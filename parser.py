@@ -45,7 +45,14 @@ class Entry:
     def display(self) -> str:
         prefix = "⭐" if self.star else ""
         where = f"（{self.file}" + (f" · {self.heading}" if self.heading else "") + "）"
-        return f"{prefix}{self.text} {where}".strip()
+        text = self.text
+        # 截断可能切断 ** 对——落单的 ** 会在前端原样显示，补成偶数
+        if text.count("**") % 2:
+            text += "**"
+        if text.count("`") % 2:
+            text += "`"
+        # 文件引用用斜体包裹：前端渲染为弱化样式
+        return f"{prefix}{text} *{where}*".strip()
 
 
 def _valid_month_day(month: int, day: int) -> bool:
