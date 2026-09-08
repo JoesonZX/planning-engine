@@ -156,13 +156,13 @@ def parse_markdown(text: str, file: str = "", today: date | None = None) -> list
 
         if done is None and not dates and not has_star:
             continue
-        show = content if len(content) <= 80 else content[:77] + "…"
+        # 不截断：报告是主阅读界面，内容必须完整（** 配平在 display 里做）
         entries.append(
             Entry(
                 file=file,
                 line=i,
                 heading=heading,
-                text=show,
+                text=content,
                 raw=line,
                 done=done,
                 star=has_star,
