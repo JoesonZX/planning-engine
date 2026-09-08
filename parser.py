@@ -44,7 +44,13 @@ class Entry:
     @property
     def display(self) -> str:
         prefix = "⭐" if self.star else ""
-        where = f"（{self.file}" + (f" · {self.heading}" if self.heading else "") + "）"
+        # 短引用：只留文件 basename（去 .md）+ 截断的小节名
+        base = self.file.rsplit("/", 1)[-1]
+        base = base[:-3] if base.endswith(".md") else base
+        head = self.heading
+        if len(head) > 14:
+            head = head[:14] + "…"
+        where = f"（{base}" + (f" · {head}" if head else "") + "）"
         text = self.text
         # 截断可能切断 ** 对——落单的 ** 会在前端原样显示，补成偶数
         if text.count("**") % 2:
@@ -136,8 +142,18 @@ def parse_markdown(text: str, file: str = "", today: date | None = None) -> list
         else:
             done = None
             content = line
+
         has_star = "⭐" in line
         dates = extract_dates(content, today)
+
+        # 展示降噪（在日期提取之后：日期格可以安全丢弃）
+        if content.startswith("|"):
+            cells = [c.strip() for c in content.strip().strip("|").split("|")]
+            if len(cells) >= 2:
+                rest = cells[1:] if extract_dates(cells[0], today) else cells
+                content = " · ".join(c for c in rest if c)
+        content = re.sub(r"^>\s*", "", content)
+
         if done is None and not dates and not has_star:
             continue
         show = content if len(content) <= 80 else content[:77] + "…"

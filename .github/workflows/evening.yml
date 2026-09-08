@@ -47,7 +47,7 @@ jobs:
 
       - name: Commit report
         run: |
-          git add reports/
+          git add reports/ 仪表盘.md
           if ! git diff --cached --quiet; then
             git commit -m "evening report $(TZ=America/Los_Angeles date +%F)"
             git pull --rebase --quiet || true

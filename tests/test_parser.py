@@ -98,6 +98,23 @@ class TestParseMarkdown(unittest.TestCase):
         self.assertTrue(entries[0].star)
         self.assertEqual(entries[0].dates, [d(9, 10)])
 
+    def test_table_row_display_cleanup(self):
+        """表格行展示：去管道符、丢弃含日期的首格、短文件引用、剥引用符。"""
+        md = "| 9.11 五 | SD 玩 #1：La Jolla |"
+        e = parse_markdown(md, file="规划/26fall 9月执行清单.md", today=TODAY)[0]
+        disp = e.display
+        self.assertNotIn("|", disp)
+        self.assertNotIn("9.11 五", disp)          # 日期格不重复
+        self.assertIn("SD 玩 #1：La Jolla", disp)
+        self.assertIn("（26fall 9月执行清单）", disp)  # 短引用：无 .md 后缀无路径
+
+        e2 = parse_markdown("> 日程框架：SD 9.11–9.14", file="a.md", today=TODAY)[0]
+        self.assertFalse(e2.text.startswith(">"))
+
+        e3 = parse_markdown("| 备注 | 10/1 买票 |", file="a.md", today=TODAY)[0]
+        self.assertEqual(e3.text, "备注 · 10/1 买票")
+        self.assertEqual(e3.dates, [d(10, 1)])
+
 
 if __name__ == "__main__":
     unittest.main()
