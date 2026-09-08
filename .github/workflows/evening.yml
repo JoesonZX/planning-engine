@@ -43,6 +43,7 @@ jobs:
           FORCE=""
           if [ "${{ inputs.force }}" = "true" ]; then FORCE="--force"; fi
           python engine/report.py --vault . --out reports/tomorrow.md --usage reports/usage.json $FORCE
+          python engine/ics.py --vault . --out reports/deadlines.ics
 
       - name: Commit report
         run: |

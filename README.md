@@ -13,6 +13,7 @@
 - `report.py` — 晚间报告（`tomorrow.md`）六大板块 + 根目录 `仪表盘.md`；可选 GLM「今晚摘要」（预算帽 $3/月，超帽自动降频为周日一次）
 - `triage.py` — 周日 20:00 inbox 分拣：私人内容（情绪/感情关键词）代码侧拦截、LLM 拿不准强制 HOLD、白名单校验三重防御；失败 = 全部 hold，数据永不丢失
 - `weekly_review.py` — 周复盘 `week-YYYY-Www.md` 七板块（只统计不评判）+ GLM 起草「下周三件事」
+- `ics.py` — 每晚生成 `reports/deadlines.ics`（⭐ 硬节点与未来日期 → 全天事件 + 前一天提醒），导入手机日历即得系统级通知
 - `.github/workflows/evening.yml` — reusable：每晚 21:00（PT）报告 + 仪表盘
 - `.github/workflows/weekly.yml` — reusable：周日 20:00（PT）分拣 + 周复盘
 - 两个 workflow 都由数据仓调用，用调用方自带 `GITHUB_TOKEN` 提交，无需任何 PAT
