@@ -165,6 +165,9 @@ def load_config(root: Path) -> dict:
         "skip_files": [],
         "skip_dirs": [".git", "reports", ".github"],
         "inbox_file": "inbox.md",
+        "dashboard_file": "仪表盘.md",
+        "weekly_hour": 20,
+        "triage_targets": [],
     }
     path = root / ".agent-config.yml"
     if not path.exists():
@@ -177,7 +180,14 @@ def load_config(root: Path) -> dict:
         if not m:
             continue
         key, val = m.group(1), m.group(2).strip()
-        if key not in cfg:
+        if key not in cfg:  # 未知键：按字面收下（向前兼容），列表形状单独处理
+            if val.startswith("[") and val.endswith("]"):
+                inner = val[1:-1].strip()
+                cfg[key] = [v.strip().strip("\"'") for v in inner.split(",")] if inner else []
+            elif val == "":
+                cfg[key] = []
+            else:
+                cfg[key] = val.strip("\"'")
             continue
         if val.startswith("[") and val.endswith("]"):
             inner = val[1:-1].strip()

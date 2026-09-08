@@ -89,6 +89,23 @@ def _li(entry: Entry) -> str:
     return f"- {entry.display}"
 
 
+def collect_stale(entries: list[Entry], file_ages: dict[str, float],
+                  today: dt.date, stale_days: int) -> list[str]:
+    """滑落项：过期 ≥stale_days 的带日期任务 + 文件陈旧的无日期任务。"""
+    stale: list[str] = []
+    for e in entries:
+        if e.done is not False:
+            continue
+        latest = max(e.dates) if e.dates else None
+        if latest and (today - latest).days >= stale_days:
+            stale.append(f"- 已拖 {(today - latest).days} 天 ｜ {e.display}")
+        elif not latest:
+            age = file_ages.get(e.file)
+            if age is not None and age >= stale_days:
+                stale.append(f"- 文件 {age:.0f} 天未动 ｜ {e.display}")
+    return stale
+
+
 def build_report(root: Path, cfg: dict, now: dt.datetime) -> str:
     tz = ZoneInfo(cfg["timezone"])
     today = now.date()
@@ -97,6 +114,10 @@ def build_report(root: Path, cfg: dict, now: dt.datetime) -> str:
     stale_days = int(cfg["stale_days"])
 
     entries = load_vault(root, cfg, today=today)
+    # inbox 单独由第五区呈现，仪表盘是生成物——都不参与解析，防重复计数
+    excluded = {cfg.get("inbox_file", "inbox.md"),
+                cfg.get("dashboard_file", "仪表盘.md")}
+    entries = [e for e in entries if e.file not in excluded]
     file_ages = file_last_commit_days(root)
 
     lines: list[str] = []
@@ -142,17 +163,7 @@ def build_report(root: Path, cfg: dict, now: dt.datetime) -> str:
     lines.append("")
 
     # 三、滑落项
-    stale: list[str] = []
-    for e in entries:
-        if e.done is not False:
-            continue
-        latest = max(e.dates) if e.dates else None
-        if latest and (today - latest).days >= stale_days:
-            stale.append(f"- 已拖 {(today - latest).days} 天 ｜ {e.display}")
-        elif not latest:
-            age = file_ages.get(e.file)
-            if age is not None and age >= stale_days:
-                stale.append(f"- 文件 {age:.0f} 天未动 ｜ {e.display}")
+    stale = collect_stale(entries, file_ages, today, stale_days)
     lines.append(f"## 三、滑落项（≥{stale_days} 天未动）")
     lines.append("")
     if stale:
@@ -296,6 +307,79 @@ def glm_summary(report_body: str, cfg: dict, api_key: str | None,
         return None, None
 
 
+# ---------------------------------------------------------------- 仪表盘
+
+def build_dashboard(root: Path, cfg: dict, now: dt.datetime) -> str:
+    """每晚随报告生成根目录 仪表盘.md（全周视角首屏）。"""
+    today = now.date()
+    horizon_end = today + dt.timedelta(days=int(cfg["horizon_days"]))
+    stale_days = int(cfg["stale_days"])
+
+    entries = load_vault(root, cfg, today=today)
+    excluded = {cfg.get("inbox_file", "inbox.md"),
+                cfg.get("dashboard_file", "仪表盘.md")}
+    entries = [e for e in entries if e.file not in excluded]
+    file_ages = file_last_commit_days(root)
+
+    lines: list[str] = []
+    lines.append(f"# 🧭 仪表盘 · {_fmt_day(today)} {now:%H:%M}")
+    lines.append("")
+    lines.append("> 每晚 21:00 随晚间报告自动更新 ｜ 只含任务与日程（物流模式）")
+    lines.append("")
+
+    today_items = [e for e in entries if any(d == today for d in e.dates)]
+    today_items.sort(key=lambda e: (not e.star, e.file))
+    lines.append("## ✅ 今天")
+    lines.append("")
+    if today_items:
+        lines.extend(_li(e) for e in today_items)
+    else:
+        lines.append("（今天没有标注事项）")
+    lines.append("")
+
+    week: list[tuple[dt.date, Entry]] = []
+    for e in entries:
+        future = [d for d in e.dates if today < d <= horizon_end]
+        if future:
+            week.append((min(future), e))
+    week.sort(key=lambda t: (t[0], not t[1].star))
+    lines.append(f"## 📅 未来 {cfg['horizon_days']} 天")
+    lines.append("")
+    if week:
+        last = None
+        for d, e in week:
+            if d != last:
+                lines.append(f"**{_fmt_day(d)}**")
+                last = d
+            lines.append(_li(e))
+    else:
+        lines.append("（未来一周没有死线）")
+    lines.append("")
+
+    stale = collect_stale(entries, file_ages, today, stale_days)
+    lines.append(f"## 🐌 滑落 ≥{stale_days} 天")
+    lines.append("")
+    if stale:
+        lines.extend(stale[:10])
+        if len(stale) > 10:
+            lines.append(f"- ……另有 {len(stale) - 10} 条（周日周报看全量）")
+    else:
+        lines.append("（没有滑落项）")
+    lines.append("")
+
+    inbox_name = cfg.get("inbox_file", "inbox.md")
+    inbox_path = root / inbox_name
+    inbox_n = 0
+    if inbox_path.exists():
+        inbox_n = sum(1 for raw in inbox_path.read_text(encoding="utf-8").splitlines()
+                      if raw.strip() and not raw.strip().startswith("#"))
+    lines.append("## 📥 inbox")
+    lines.append("")
+    lines.append(f"待分拣 **{inbox_n}** 条（每周日 20:00 自动分拣；⏳ 项需你人工处理）")
+    lines.append("")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------- 入口
 
 def main() -> int:
@@ -330,6 +414,10 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(body + "\n", encoding="utf-8")
     print(f"[ok] wrote {out_path}")
+
+    dash = root / cfg.get("dashboard_file", "仪表盘.md")
+    dash.write_text(build_dashboard(root, cfg, now) + "\n", encoding="utf-8")
+    print(f"[ok] wrote {dash}")
     return 0
 
 
