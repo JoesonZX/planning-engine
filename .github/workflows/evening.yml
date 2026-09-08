@@ -1,0 +1,56 @@
+name: evening report (reusable)
+on:
+  workflow_call:
+    inputs:
+      force:
+        description: "跳过 21:00 时刻门（手动触发/测试用）"
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      GLM_API_KEY:
+        required: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout data vault (caller repo)
+        uses: actions/checkout@v4
+
+      - name: Checkout engine
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/planning-engine
+          ref: main
+          path: engine
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run engine unit tests
+        run: python -m unittest discover -s engine/tests
+
+      - name: Generate evening report
+        env:
+          GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
+        run: |
+          git config user.name "planning-bot"
+          git config user.email "planning-bot@users.noreply.github.com"
+          FORCE=""
+          if [ "${{ inputs.force }}" = "true" ]; then FORCE="--force"; fi
+          python engine/report.py --vault . --out reports/tomorrow.md --usage reports/usage.json $FORCE
+
+      - name: Commit report
+        run: |
+          git add reports/
+          if ! git diff --cached --quiet; then
+            git commit -m "evening report $(TZ=America/Los_Angeles date +%F)"
+            git pull --rebase --quiet || true
+            git push
+          else
+            echo "report unchanged, nothing to commit"
+          fi
