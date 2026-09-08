@@ -107,6 +107,7 @@ class TestParseMarkdown(unittest.TestCase):
         self.assertNotIn("9.11 五", disp)          # 日期格不重复
         self.assertIn("SD 玩 #1：La Jolla", disp)
         self.assertIn("（26fall 9月执行清单）", disp)  # 短引用：无 .md 后缀无路径
+        self.assertNotIn("…", disp)                 # 元数据无省略号
 
         e2 = parse_markdown("> 日程框架：SD 9.11–9.14", file="a.md", today=TODAY)[0]
         self.assertFalse(e2.text.startswith(">"))

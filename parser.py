@@ -44,13 +44,11 @@ class Entry:
     @property
     def display(self) -> str:
         prefix = "⭐" if self.star else ""
-        # 短引用：只留文件 basename（去 .md）+ 截断的小节名
+        # 短引用：只留文件 basename（去 .md）。小节名一律不带——截断的元数据
+        # 在阅读界面看起来就是"内容不全"
         base = self.file.rsplit("/", 1)[-1]
         base = base[:-3] if base.endswith(".md") else base
-        head = self.heading
-        if len(head) > 14:
-            head = head[:14] + "…"
-        where = f"（{base}" + (f" · {head}" if head else "") + "）"
+        where = f"（{base}）"
         text = self.text
         # 截断可能切断 ** 对——落单的 ** 会在前端原样显示，补成偶数
         if text.count("**") % 2:
