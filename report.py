@@ -396,8 +396,11 @@ def main() -> int:
     tz = ZoneInfo(cfg["timezone"])
     now = dt.datetime.now(tz)
 
-    if not args.force and now.hour != int(cfg["report_hour"]):
-        print(f"[skip] local hour {now.hour} != report_hour {cfg['report_hour']}")
+    # 时刻门放宽到 2 小时窗：GitHub cron 可能延迟几十分钟，
+    # 只认整点会把延迟的运行拒掉导致当晚报告丢失；重复触发无害（内容相同不提交）
+    hour_window = {int(cfg["report_hour"]), int(cfg["report_hour"]) + 1}
+    if not args.force and now.hour not in hour_window:
+        print(f"[skip] local hour {now.hour} not in {sorted(hour_window)}")
         return 0
 
     body = build_report(root, cfg, now)

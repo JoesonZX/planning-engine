@@ -208,8 +208,9 @@ def main() -> int:
     cfg = load_config(root)
     now = dt.datetime.now(ZoneInfo(cfg["timezone"]))
     weekly_hour = int(cfg.get("weekly_hour", 20))
-    if not args.force and not (now.weekday() == 6 and now.hour == weekly_hour):
-        print(f"[skip] not Sunday {weekly_hour}:00 local")
+    # 2 小时窗：cron 延迟容错（重复触发生成相同周报，git 判断无变化不提交）
+    if not args.force and not (now.weekday() == 6 and now.hour in (weekly_hour, weekly_hour + 1)):
+        print(f"[skip] not Sunday {weekly_hour}:00±1h local")
         return 0
 
     body, title = build_weekly(root, cfg, now)

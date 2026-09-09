@@ -217,9 +217,10 @@ def main() -> int:
     cfg = load_config(root)
     now = dt.datetime.now(ZoneInfo(cfg["timezone"]))
     weekly_hour = int(cfg.get("weekly_hour", 20))
-    if not args.force and not (now.weekday() == 6 and now.hour == weekly_hour):
-        print(f"[skip] not Sunday {weekly_hour}:00 local "
-              f"(now: {now.weekday()}/{now.hour})")
+    # 2 小时窗：cron 延迟容错（重复触发时第二次全 hold 或无变化，无害）
+    if not args.force and not (now.weekday() == 6 and now.hour in (weekly_hour, weekly_hour + 1)):
+        print(f"[skip] not Sunday {weekly_hour}:00±1h local "
+              f"(now: weekday={now.weekday()} hour={now.hour})")
         return 0
     summary = triage(root, cfg, __import__("os").environ.get("GLM_API_KEY"))
     print(f"[ok] triage: {summary['classified']} classified, "
