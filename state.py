@@ -60,10 +60,20 @@ def build_state(root: Path, cfg: dict, now: dt.datetime) -> dict:
     stale = sorted(stale_src,
                    key=lambda e: -((today - max(e.dates)).days if e.dates
                                    else file_ages.get(e.file, 0)))
+    # timeline 归一化：config 里每行是 '- ["08:30", "标签"]' 字符串 → 解析成 [time, label]
+    timeline = []
+    for row in cfg.get("timeline", []):
+        if isinstance(row, str):
+            try:
+                row = json.loads(row)
+            except (json.JSONDecodeError, ValueError):
+                continue
+        if isinstance(row, (list, tuple)) and len(row) == 2:
+            timeline.append([str(row[0]), str(row[1])])
     return {
         "generated_at": now.isoformat(timespec="seconds"),
         "today": today.isoformat(),
-        "timeline": cfg.get("timeline", []),
+        "timeline": timeline,
         "today_items": sorted(today_items, key=lambda x: (not x["s"],)),
         "week": [{"date": d, "items": week[d]} for d in sorted(week)],
         "stale": [_item(e, today) for e in stale[:12]],
