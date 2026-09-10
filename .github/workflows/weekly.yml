@@ -55,3 +55,19 @@ jobs:
           else
             echo "nothing to commit"
           fi
+
+      - name: Push notification (success)
+        if: success()
+        env:
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+        run: |
+          pip install -q pywebpush 2>/dev/null || true
+          python engine/notify.py --vault . --kind weekly --msg "本周复盘已生成，周日晚间看一眼" || true
+
+      - name: Push notification (failure)
+        if: failure()
+        env:
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+        run: |
+          pip install -q pywebpush 2>/dev/null || true
+          python engine/notify.py --vault . --kind failure --msg "周任务（分拣/复盘）失败，让 ZCode 修" || true

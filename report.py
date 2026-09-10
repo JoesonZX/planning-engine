@@ -383,6 +383,18 @@ def build_dashboard(root: Path, cfg: dict, now: dt.datetime) -> str:
 
 # ---------------------------------------------------------------- 入口
 
+def vault_quiet(root: Path) -> bool:
+    """24h 内无非 bot 提交 → vault 无变化，跳过 GLM 摘要（省钱省幂）。"""
+    try:
+        log = subprocess.run(
+            ["git", "-C", str(root), "log", "--since=24 hours ago",
+             "--pretty=format:%an|%ae"],
+            capture_output=True, text=True, timeout=30, check=True).stdout
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return all("planning-bot" not in line for line in log.splitlines() if line)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="evening report generator")
     ap.add_argument("--vault", required=True)
@@ -410,8 +422,12 @@ def main() -> int:
 
     body = build_report(root, cfg, now)
 
-    summary, _rec = glm_summary(body, cfg, __import__("os").environ.get("GLM_API_KEY"),
-                                root / args.usage, now)
+    quiet = vault_quiet(root)
+    if quiet:
+        print("[info] vault unchanged in 24h — skipping GLM summary")
+    summary, _rec = (None, None) if quiet else glm_summary(
+        body, cfg, __import__("os").environ.get("GLM_API_KEY"),
+        root / args.usage, now)
     if summary:
         lines = body.splitlines()
         insert = next((i for i, l in enumerate(lines) if l.startswith("## 一、")), len(lines))

@@ -44,6 +44,7 @@ jobs:
           if [ "${{ inputs.force }}" = "true" ]; then FORCE="--force"; fi
           python engine/report.py --vault . --out reports/tomorrow.md --usage reports/usage.json $FORCE
           python engine/ics.py --vault . --out reports/deadlines.ics
+          python engine/state.py --vault .
 
       - name: Commit report
         run: |
@@ -55,3 +56,19 @@ jobs:
           else
             echo "report unchanged, nothing to commit"
           fi
+
+      - name: Push notification (success)
+        if: success()
+        env:
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+        run: |
+          pip install -q pywebpush 2>/dev/null || true
+          python engine/notify.py --vault . --kind evening || true
+
+      - name: Push notification (failure)
+        if: failure()
+        env:
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+        run: |
+          pip install -q pywebpush 2>/dev/null || true
+          python engine/notify.py --vault . --kind failure --msg "晚间报告任务失败，打开 GitHub Actions 查看日志（或让 ZCode 修）" || true
