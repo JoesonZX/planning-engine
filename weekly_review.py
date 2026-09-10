@@ -55,7 +55,11 @@ def added_checkboxes_by_file(root: Path, since: str, until: str | None = None,
 
 def build_weekly(root: Path, cfg: dict, now: dt.datetime) -> tuple[str, str]:
     today = now.date()
-    week_no = today.isocalendar()[1]
+    # 报告"刚结束的完整周"（周一~周日）：今天周日则本周日截止，否则上个周日。
+    # 与生成时刻解耦——GitHub cron 延迟到周一/周二跑，报告的仍是正确的那一周。
+    week_end = today if today.weekday() == 6 else today - dt.timedelta(days=today.weekday() + 1)
+    week_start = week_end - dt.timedelta(days=6)
+    iso = week_end.isocalendar()
     stale_days = int(cfg["stale_days"])
 
     entries = load_vault(root, cfg, today=today)
@@ -64,12 +68,14 @@ def build_weekly(root: Path, cfg: dict, now: dt.datetime) -> tuple[str, str]:
     entries = [e for e in entries if e.file not in excluded]
     file_ages = file_last_commit_days(root)
 
-    done_now = added_checkboxes_by_file(root, "7 days ago", done=True)
-    done_prev = added_checkboxes_by_file(root, "14 days ago", "7 days ago", done=True)
-    new_now = added_checkboxes_by_file(root, "7 days ago", done=False)
+    next_day = (week_end + dt.timedelta(days=1)).isoformat()
+    prev_end = (week_start - dt.timedelta(days=1)).isoformat()
+    done_now = added_checkboxes_by_file(root, week_start.isoformat(), next_day, done=True)
+    done_prev = added_checkboxes_by_file(root, prev_end, week_start.isoformat(), done=True)
+    new_now = added_checkboxes_by_file(root, week_start.isoformat(), done=False)
 
     lines: list[str] = []
-    title = f"周复盘 · {today.year}-W{week_no:02d}（{today - dt.timedelta(days=6):%m/%d}–{today:%m/%d}）"
+    title = f"周复盘 · {iso[0]}-W{iso[1]:02d}（{week_start:%m/%d}–{week_end:%m/%d}）"
     lines.append(f"# 📊 {title}")
     lines.append("")
     lines.append(f"> 生成于 {now:%Y-%m-%d %H:%M} ｜ 只统计不评判（物流模式）")
@@ -108,8 +114,7 @@ def build_weekly(root: Path, cfg: dict, now: dt.datetime) -> tuple[str, str]:
         lines.append("（没有滑落项）")
     lines.append("")
 
-    # 四、本周硬节点
-    week_start, week_end = today - dt.timedelta(days=6), today + dt.timedelta(days=1)
+    # 四、本周硬节点（报告周范围内的 ⭐）
     nodes = [e for e in entries if e.star
              and any(week_start <= d <= week_end for d in e.dates)]
     nodes.sort(key=lambda e: (e.file, e.line))
@@ -207,10 +212,13 @@ def main() -> int:
     root = Path(args.vault).resolve()
     cfg = load_config(root)
     now = dt.datetime.now(ZoneInfo(cfg["timezone"]))
-    weekly_hour = int(cfg.get("weekly_hour", 20))
-    # 2 小时窗：cron 延迟容错（重复触发生成相同周报，git 判断无变化不提交）
-    if not args.force and not (now.weekday() == 6 and now.hour in (weekly_hour, weekly_hour + 1)):
-        print(f"[skip] not Sunday {weekly_hour}:00±1h local")
+    # 幂等去重：本 ISO 周的周报文件已存在即跳过（force 重生成）。
+    # 与运行时刻解耦——cron 延迟到周一/周二，报告的仍是刚结束的那个周。
+    iso = (now.date() if now.date().weekday() == 6
+           else now.date() - dt.timedelta(days=now.date().weekday() + 1)).isocalendar()
+    out = root / "reports" / f"week-{iso[0]}-W{iso[1]:02d}.md"
+    if not args.force and out.exists():
+        print(f"[skip] {out.name} already exists")
         return 0
 
     body, title = build_weekly(root, cfg, now)
@@ -224,8 +232,6 @@ def main() -> int:
     block += [""]
     body = "\n".join(lines[:insert] + block + lines[insert:])
 
-    week_no = now.date().isocalendar()[1]
-    out = root / "reports" / f"week-{now.date().year}-W{week_no:02d}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(body + "\n", encoding="utf-8")
     print(f"[ok] wrote {out}")

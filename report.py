@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 import subprocess
 import sys
 import urllib.request
@@ -396,12 +397,16 @@ def main() -> int:
     tz = ZoneInfo(cfg["timezone"])
     now = dt.datetime.now(tz)
 
-    # 时刻门放宽到 2 小时窗：GitHub cron 可能延迟几十分钟，
-    # 只认整点会把延迟的运行拒掉导致当晚报告丢失；重复触发无害（内容相同不提交）
-    hour_window = {int(cfg["report_hour"]), int(cfg["report_hour"]) + 1}
-    if not args.force and now.hour not in hour_window:
-        print(f"[skip] local hour {now.hour} not in {sorted(hour_window)}")
-        return 0
+    # 幂等去重（取代时刻门：GitHub cron 实测延迟可达 4h+，掐时间必漏）：
+    # 今天已生成且已过傍晚 → 跳过；清晨生成的版本允许傍晚刷新一次
+    if not args.force:
+        out_path = root / args.out
+        if out_path.exists():
+            head = out_path.read_text(encoding="utf-8")[:400]
+            m = re.search(r"生成于 (\d{4}-\d{2}-\d{2})", head)
+            if m and m.group(1) == now.strftime("%Y-%m-%d") and now.hour < 18:
+                print("[skip] today's report already generated (pre-evening)")
+                return 0
 
     body = build_report(root, cfg, now)
 

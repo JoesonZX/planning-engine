@@ -216,11 +216,10 @@ def main() -> int:
     root = Path(args.vault).resolve()
     cfg = load_config(root)
     now = dt.datetime.now(ZoneInfo(cfg["timezone"]))
-    weekly_hour = int(cfg.get("weekly_hour", 20))
-    # 2 小时窗：cron 延迟容错（重复触发时第二次全 hold 或无变化，无害）
-    if not args.force and not (now.weekday() == 6 and now.hour in (weekly_hour, weekly_hour + 1)):
-        print(f"[skip] not Sunday {weekly_hour}:00±1h local "
-              f"(now: weekday={now.weekday()} hour={now.hour})")
+    # 门 = 周日或周一（本地）：GitHub cron 延迟可达数小时，掐小时必漏。
+    # 分拣幂等（跑完 inbox 即空），重复触发无害。
+    if not args.force and now.weekday() not in (6, 0):
+        print(f"[skip] not Sunday/Monday local (weekday={now.weekday()})")
         return 0
     summary = triage(root, cfg, __import__("os").environ.get("GLM_API_KEY"))
     print(f"[ok] triage: {summary['classified']} classified, "
