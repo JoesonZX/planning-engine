@@ -47,7 +47,7 @@ jobs:
 
       - name: Commit
         run: |
-          git add -A
+          git add -A -- ':!engine'
           if ! git diff --cached --quiet; then
             git commit -m "weekly triage+review $(TZ=America/Los_Angeles date +%F)"
             git pull --rebase --quiet || true
