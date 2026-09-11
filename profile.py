@@ -140,12 +140,14 @@ def _glm_revise(handwritten: str, old_agent: str, weekly_body: str,
         return None
 
     from report import GLM_URL  # 局部导入避免 report ⇄ profile 环
+    iso = now.date().isocalendar()
     user_prompt = (
+        f"【今天是 {now:%Y-%m-%d}，ISO 周 W{iso[1]}——修订记录的日期以这个为准】\n\n"
         f"【手写区（仅供理解用户自述，严禁输出或修改）】\n{handwritten or '（空）'}\n\n"
         f"【旧画像正文】\n{old_agent}\n\n"
         f"【本周复盘（唯一证据源）】\n{weekly_body}\n\n"
         "输出修订后的画像正文。只改有新证据的条目，其余原样保留，"
-        "末尾更新修订记录（- M.D Wxx: 一句说明）。"
+        f"末尾更新修订记录（- {now:%m-%d} W{iso[1]}: 一句说明）。"
     )
     payload = json.dumps({
         "model": cfg.get("model", "glm-4-flash"),
