@@ -391,7 +391,11 @@ def build_dashboard(root: Path, cfg: dict, now: dt.datetime) -> str:
 # ---------------------------------------------------------------- 入口
 
 def vault_quiet(root: Path) -> bool:
-    """24h 内无非 bot 提交 → vault 无变化，跳过 GLM 摘要（省钱省幂）。"""
+    """24h 内无非 bot 提交 → vault 无变化，跳过 GLM 摘要（省钱省幂）。
+
+    即：每一条提交都是 bot 的才算安静；没有任何提交也视为安静。
+    （v3 上线时比较符写反：活跃日被当安静日跳过摘要——v4 端到端测试抓出）
+    """
     try:
         log = subprocess.run(
             ["git", "-C", str(root), "log", "--since=24 hours ago",
@@ -399,7 +403,7 @@ def vault_quiet(root: Path) -> bool:
             capture_output=True, text=True, timeout=30, check=True).stdout
     except (subprocess.SubprocessError, OSError):
         return False
-    return all("planning-bot" not in line for line in log.splitlines() if line)
+    return all("planning-bot" in line for line in log.splitlines() if line)
 
 
 def main() -> int:
