@@ -119,3 +119,22 @@ class TestParseMarkdown(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEngineDirExcluded(unittest.TestCase):
+    def test_engine_checkout_never_parsed(self):
+        """v5 事故回归：workflow 检出的 engine/ 目录（含 golden 快照）不是用户任务。"""
+        import tempfile
+        from parser import iter_vault_files, load_config
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "规划").mkdir()
+            (root / "规划" / "real.md").write_text("- [ ] 真任务 9/12\n", encoding="utf-8")
+            eng = root / "engine" / "tests" / "golden"
+            eng.mkdir(parents=True)
+            (eng / "report.md").write_text("- [ ] 幽灵任务 9/12 *（main）*\n", encoding="utf-8")
+            cfg = load_config(root)
+            files = [p.relative_to(root).as_posix()
+                     for p in iter_vault_files(root, cfg)]
+            self.assertIn("规划/real.md", files)
+            self.assertNotIn("engine/tests/golden/report.md", files)

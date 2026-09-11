@@ -184,7 +184,7 @@ def load_config(root: Path) -> dict:
         "horizon_days": 7,
         "stale_days": 14,
         "skip_files": [],
-        "skip_dirs": [".git", "reports", ".github"],
+        "skip_dirs": [".git", "reports", ".github", "engine"],
         "inbox_file": "inbox.md",
         "dashboard_file": "仪表盘.md",
         "profile_file": "profile.md",
@@ -252,7 +252,12 @@ def generated_files(cfg: dict) -> set[str]:
 
 
 def iter_vault_files(root: Path, cfg: dict) -> list[Path]:
-    """列出参与解析的 md 文件：跳过 skip_dirs 目录与 skip_files 文件名。"""
+    """列出参与解析的 md 文件：跳过 skip_dirs 目录与 skip_files 文件名。
+
+    默认 skip_dirs 含 "engine"：workflow 会把引擎仓检出到 vault 工作区的
+    engine/ 目录，其中的 md（README/golden 快照）不是用户任务
+    （v5 事故：golden 快照被解析成 16 条幽灵任务进了 state.json）。
+    """
     skip_dirs = set(cfg.get("skip_dirs", []))
     skip_files = set(cfg.get("skip_files", []))
     out: list[Path] = []

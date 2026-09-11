@@ -2,6 +2,10 @@
 """捕获 golden 快照：用**当前**代码跑一遍合成 vault，把输出写进 tests/golden/。
 
 用途：重构前捕获、每步重构后跑 test_golden.py 比对——行为不变则全绿。
+快照一律用 .golden 后缀：任何 *.md 形态的快照在被检出到 vault 工作区
+（如 Actions 的 engine/ 目录）时都可能被 parser 误当任务——
+非 .md 后缀从根上免疫（v5 事故教训：golden 快照污染线上 state.json）。
+
 注意：快照含相对日期的绝对形态（如 today+1 的具体日期），只在捕获后
 ~48 小时内有效（test_golden 超龄自动 skip，不挡 CI）。
 
@@ -12,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -28,12 +33,12 @@ def main() -> int:
     outputs = {name: normalize(text) for name, text in collect_outputs(root).items()}
     GOLDEN_DIR.mkdir(exist_ok=True)
     for name, text in outputs.items():
-        (GOLDEN_DIR / name).write_text(text, encoding="utf-8", newline="\n")
+        with open(GOLDEN_DIR / f"{name}.golden", "w", encoding="utf-8", newline="") as f:
+            f.write(text)
         print(f"[ok] golden {name} ({len(text)} chars)")
     (GOLDEN_DIR / "manifest.json").write_text(
         json.dumps({"captured_at": dt.datetime.now(dt.timezone.utc).isoformat()},
                    indent=1), encoding="utf-8")
-    import shutil
     shutil.rmtree(root, ignore_errors=True)
     return 0
 
