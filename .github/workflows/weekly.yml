@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout data vault (caller repo)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 滑落/完成统计/环比全部依赖 git 历史，浅克隆会静默清零
 
       - name: Checkout engine
         uses: actions/checkout@v4
