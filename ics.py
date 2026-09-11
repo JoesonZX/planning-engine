@@ -10,9 +10,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
-import sys
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from parser import load_config
 from vault import Snapshot
