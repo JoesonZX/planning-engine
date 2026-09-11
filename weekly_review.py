@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from parser import load_config, load_vault
+from parser import generated_files, load_config, load_vault
 from report import (GLM_URL, SYSTEM_PROMPT, _fmt_day, collect_stale,
                     file_last_commit_days, month_spend)
 
@@ -63,8 +63,7 @@ def build_weekly(root: Path, cfg: dict, now: dt.datetime) -> tuple[str, str]:
     stale_days = int(cfg["stale_days"])
 
     entries = load_vault(root, cfg, today=today)
-    excluded = {cfg.get("inbox_file", "inbox.md"),
-                cfg.get("dashboard_file", "仪表盘.md")}
+    excluded = generated_files(cfg)
     entries = [e for e in entries if e.file not in excluded]
     file_ages = file_last_commit_days(root)
 
@@ -235,6 +234,12 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(body + "\n", encoding="utf-8")
     print(f"[ok] wrote {out}")
+
+    # 画像层：周报落盘后顺带维护（证据源 = 本周周报 body；失败保持上周版）
+    from profile import update_profile
+    updated = update_profile(root, cfg, os.environ.get("GLM_API_KEY"),
+                             root / "reports" / "usage.json", now, body)
+    print(f"[ok] profile {'updated' if updated else 'kept (revision skipped)'}")
     return 0
 
 

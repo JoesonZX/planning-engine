@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from parser import Entry, load_config, load_vault
+from parser import Entry, generated_files, load_config, load_vault
 
 WEEKDAY_CN = ["一", "二", "三", "四", "五", "六", "日"]
 
@@ -115,9 +115,8 @@ def build_report(root: Path, cfg: dict, now: dt.datetime) -> str:
     stale_days = int(cfg["stale_days"])
 
     entries = load_vault(root, cfg, today=today)
-    # inbox 单独由第五区呈现，仪表盘是生成物——都不参与解析，防重复计数
-    excluded = {cfg.get("inbox_file", "inbox.md"),
-                cfg.get("dashboard_file", "仪表盘.md")}
+    # inbox 由第五区呈现，仪表盘/画像是生成物——都不参与解析，防重复计数
+    excluded = generated_files(cfg)
     entries = [e for e in entries if e.file not in excluded]
     file_ages = file_last_commit_days(root)
 
@@ -254,8 +253,21 @@ def month_spend(usage_path: Path, now: dt.datetime) -> float:
     return total
 
 
+def _build_summary_prompt(report_body: str, profile_text: str = "") -> str:
+    """摘要 prompt；有画像时注入（2026.9.11 定案：晚报使用画像）。"""
+    base = (
+        "下面是明天的规划报告。用 2-3 句中文总结：明天最重要的事是什么、"
+        "有没有需要今晚先动一步的；再给一条具体的明日建议。不要复述全部内容。"
+    )
+    if profile_text:
+        base = ("用户画像（个性化参考，只用于调整建议的侧重点与措辞，"
+                f"不要复述画像内容）：\n{profile_text}\n\n{base}")
+    return base + "\n\n" + report_body
+
+
 def glm_summary(report_body: str, cfg: dict, api_key: str | None,
-                usage_path: Path, now: dt.datetime) -> tuple[str | None, dict | None]:
+                usage_path: Path, now: dt.datetime,
+                profile_text: str = "") -> tuple[str | None, dict | None]:
     """预算帽：本月花费超预算且今天不是周日 → 跳过（降频为周日模式）。"""
     if not api_key:
         return None, None
@@ -265,11 +277,7 @@ def glm_summary(report_body: str, cfg: dict, api_key: str | None,
     if spent >= budget and not is_sunday:
         return None, {"skipped": "budget_reached", "spent": spent}
 
-    prompt = (
-        "下面是明天的规划报告。用 2-3 句中文总结：明天最重要的事是什么、"
-        "有没有需要今晚先动一步的；再给一条具体的明日建议。不要复述全部内容。\n\n"
-        + report_body
-    )
+    prompt = _build_summary_prompt(report_body, profile_text)
     payload = json.dumps({
         "model": cfg.get("model", "glm-4-flash"),
         "messages": [
@@ -317,8 +325,7 @@ def build_dashboard(root: Path, cfg: dict, now: dt.datetime) -> str:
     stale_days = int(cfg["stale_days"])
 
     entries = load_vault(root, cfg, today=today)
-    excluded = {cfg.get("inbox_file", "inbox.md"),
-                cfg.get("dashboard_file", "仪表盘.md")}
+    excluded = generated_files(cfg)
     entries = [e for e in entries if e.file not in excluded]
     file_ages = file_last_commit_days(root)
 
@@ -425,9 +432,17 @@ def main() -> int:
     quiet = vault_quiet(root)
     if quiet:
         print("[info] vault unchanged in 24h — skipping GLM summary")
+    # 画像注入（v4 定案）：只在真的要调 GLM 时读；画像缺失/读挂不拦报告
+    profile_text = ""
+    if not quiet:
+        try:
+            from profile import load_for_prompt
+            profile_text = load_for_prompt(root, cfg)
+        except Exception:  # noqa: BLE001
+            profile_text = ""
     summary, _rec = (None, None) if quiet else glm_summary(
         body, cfg, __import__("os").environ.get("GLM_API_KEY"),
-        root / args.usage, now)
+        root / args.usage, now, profile_text=profile_text)
     if summary:
         lines = body.splitlines()
         insert = next((i for i, l in enumerate(lines) if l.startswith("## 一、")), len(lines))

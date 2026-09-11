@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from parser import load_config, load_vault
+from parser import generated_files, load_config, load_vault
 
 PAST_DAYS = 7
 FUTURE_DAYS = 120
@@ -87,8 +87,7 @@ def build_vevent(d: dt.date, text: str, star: bool, file: str, line: int,
 def generate_ics(root: Path, cfg: dict, today: dt.date,
                  now_utc: dt.datetime) -> bytes:
     entries = load_vault(root, cfg, today=today)
-    excluded = {cfg.get("inbox_file", "inbox.md"),
-                cfg.get("dashboard_file", "仪表盘.md")}
+    excluded = generated_files(cfg)
     entries = [e for e in entries if e.file not in excluded]
 
     lo = today - dt.timedelta(days=PAST_DAYS)

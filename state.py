@@ -16,8 +16,8 @@ import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from parser import load_config, load_vault
-from report import collect_stale, file_last_commit_days
+from parser import generated_files, load_config, load_vault
+from report import file_last_commit_days
 
 
 def _item(e, today: dt.date) -> dict:
@@ -35,8 +35,7 @@ def build_state(root: Path, cfg: dict, now: dt.datetime) -> dict:
     today = now.date()
     horizon_end = today + dt.timedelta(days=int(cfg["horizon_days"]))
     entries = load_vault(root, cfg, today=today)
-    excluded = {cfg.get("inbox_file", "inbox.md"),
-                cfg.get("dashboard_file", "仪表盘.md")}
+    excluded = generated_files(cfg)
     entries = [e for e in entries if e.file not in excluded]
     file_ages = file_last_commit_days(root)
 
