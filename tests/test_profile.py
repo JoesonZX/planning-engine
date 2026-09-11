@@ -12,7 +12,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from profile import (MAX_LINES, TEMPLATE, load_for_prompt,  # noqa: E402
+from profile import (ALLOWED_SECTIONS, MAX_LINES, TEMPLATE,  # noqa: E402
+                     _revision_guard_ok, load_for_prompt, sanitize_weekly_body,
                      split_regions, update_profile)
 from report import _build_summary_prompt  # noqa: E402
 
@@ -154,6 +155,59 @@ class TestPromptLoading(unittest.TestCase):
         p = _build_summary_prompt("报告正文")
         self.assertNotIn("画像", p)
         self.assertIn("报告正文", p)
+
+
+class TestRevisionGuard(unittest.TestCase):
+    """结构白名单（v4 首跑真实案例：flash 把周报 ⭐⭐ 硬节点整段抄进画像）。"""
+
+    def test_valid_revision_passes(self):
+        ok, _ = _revision_guard_ok(
+            "## 当前重心\n- 科研 ≥15h/周（W37·滑落区）\n\n## 修订记录\n- 2026-09-13 W37: 更新\n")
+        self.assertTrue(ok)
+
+    def test_star_task_line_rejected(self):
+        ok, why = _revision_guard_ok("## 常见滑落模式\n- ⭐⭐预约事项一直未动（W36）\n")
+        self.assertFalse(ok, why)
+
+    def test_checkbox_line_rejected(self):
+        ok, _ = _revision_guard_ok("## 常见滑落模式\n- [ ] 买票 9/17\n")
+        self.assertFalse(ok)
+
+    def test_flat_bullets_without_sections_rejected(self):
+        # 真实首跑失败形态：丢掉全部 ## 小节，只剩 bullet 平铺
+        ok, why = _revision_guard_ok("- 第一优先：科研\n- 每天读书\n")
+        self.assertFalse(ok)
+        self.assertIn("section", why)
+
+    def test_unknown_section_rejected(self):
+        ok, _ = _revision_guard_ok("## 用户心理分析\n- 内向\n")
+        self.assertFalse(ok)
+
+    def test_overlong_bullet_rejected(self):
+        long_line = "- " + "很长的任务描述" * 30
+        ok, why = _revision_guard_ok(f"## 常见滑落模式\n{long_line}\n")
+        self.assertFalse(ok)
+        self.assertIn("bullet", why)
+
+    def test_allowed_sections_cover_six(self):
+        self.assertEqual(len(ALLOWED_SECTIONS), 6)
+
+
+class TestSanitizeWeeklyBody(unittest.TestCase):
+    def test_keeps_only_stat_sections(self):
+        body = ("# 周复盘\n> 生成于 x\n"
+                "## 一、本周完成\n- 3 件\n"
+                "## ⏭️ 下周三件事\n1. 预约医疗\n"
+                "## 四、本周硬节点（⭐）\n- ⬜ ⭐⭐医疗预约\n"
+                "## 五、inbox 残留\n⏳ 待人工 1 条\n"
+                "## 六、GLM 用量\n$0.00\n")
+        out = sanitize_weekly_body(body)
+        self.assertIn("## 一、本周完成", out)
+        self.assertIn("## 六、GLM 用量", out)
+        self.assertNotIn("硬节点", out)
+        self.assertNotIn("医疗", out)
+        self.assertNotIn("三件事", out)
+        self.assertNotIn("inbox", out)
 
 
 class TestTemplate(unittest.TestCase):
