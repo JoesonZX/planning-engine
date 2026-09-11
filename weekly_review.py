@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """周复盘：周日 20:00 生成 reports/week-YYYY-Www.md（七板块，只统计不评判）。
 
-数据源：git diff（完成/新增计数）+ parser（滑落/硬节点）+ GLM（下周三件事草稿）。
+数据源：Snapshot（滑落/硬节点/inbox）+ git diff（完成/新增计数）
++ GLM（下周三件事草稿）+ 顺带维护画像（profile.update_profile）。
 """
 
 from __future__ import annotations
@@ -12,14 +13,13 @@ import json
 import os
 import re
 import subprocess
-import sys
-import urllib.request
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from parser import generated_files, load_config, load_vault
-from report import (GLM_URL, SYSTEM_PROMPT, _fmt_day, collect_stale,
-                    file_last_commit_days, month_spend)
+from parser import load_config
+from vault import Snapshot
+from llm import call_glm, month_spend
+from report import SYSTEM_PROMPT, collect_stale
 
 
 # ---------------------------------------------------------------- git 统计
@@ -53,25 +53,21 @@ def added_checkboxes_by_file(root: Path, since: str, until: str | None = None,
 
 # ---------------------------------------------------------------- 报告主体
 
-def build_weekly(root: Path, cfg: dict, now: dt.datetime) -> tuple[str, str]:
-    today = now.date()
+def render_weekly(snap: Snapshot) -> tuple[str, str]:
+    today, cfg, now = snap.today, snap.cfg, snap.now
     # 报告"刚结束的完整周"（周一~周日）：今天周日则本周日截止，否则上个周日。
     # 与生成时刻解耦——GitHub cron 延迟到周一/周二跑，报告的仍是正确的那一周。
     week_end = today if today.weekday() == 6 else today - dt.timedelta(days=today.weekday() + 1)
     week_start = week_end - dt.timedelta(days=6)
     iso = week_end.isocalendar()
-    stale_days = int(cfg["stale_days"])
 
-    entries = load_vault(root, cfg, today=today)
-    excluded = generated_files(cfg)
-    entries = [e for e in entries if e.file not in excluded]
-    file_ages = file_last_commit_days(root)
+    entries = snap.entries
 
     next_day = (week_end + dt.timedelta(days=1)).isoformat()
     prev_end = (week_start - dt.timedelta(days=1)).isoformat()
-    done_now = added_checkboxes_by_file(root, week_start.isoformat(), next_day, done=True)
-    done_prev = added_checkboxes_by_file(root, prev_end, week_start.isoformat(), done=True)
-    new_now = added_checkboxes_by_file(root, week_start.isoformat(), done=False)
+    done_now = added_checkboxes_by_file(snap.root, week_start.isoformat(), next_day, done=True)
+    done_prev = added_checkboxes_by_file(snap.root, prev_end, week_start.isoformat(), done=True)
+    new_now = added_checkboxes_by_file(snap.root, week_start.isoformat(), done=False)
 
     lines: list[str] = []
     title = f"周复盘 · {iso[0]}-W{iso[1]:02d}（{week_start:%m/%d}–{week_end:%m/%d}）"
@@ -104,8 +100,8 @@ def build_weekly(root: Path, cfg: dict, now: dt.datetime) -> tuple[str, str]:
     lines.append("")
 
     # 三、滑落升级（全量，不截断）
-    stale = collect_stale(entries, file_ages, today, stale_days)
-    lines.append(f"## 三、滑落升级（≥{stale_days} 天未动，全量）")
+    stale = collect_stale(snap)
+    lines.append(f"## 三、滑落升级（≥{snap.stale_days} 天未动，全量）")
     lines.append("")
     if stale:
         lines.extend(stale)
@@ -130,14 +126,9 @@ def build_weekly(root: Path, cfg: dict, now: dt.datetime) -> tuple[str, str]:
     lines.append("")
 
     # 五、inbox 与分拣残留
-    inbox_name = cfg.get("inbox_file", "inbox.md")
-    inbox_path = root / inbox_name
-    held_n = 0
-    if inbox_path.exists():
-        held_n = sum(1 for raw in inbox_path.read_text(encoding="utf-8").splitlines()
-                     if raw.strip().startswith("⏳"))
+    held_n = sum(1 for s in snap.inbox_lines if s.startswith("⏳"))
     triage_info = ""
-    triage_path = root / "reports" / "triage-latest.json"
+    triage_path = snap.root / "reports" / "triage-latest.json"
     if triage_path.exists():
         try:
             t = json.loads(triage_path.read_text(encoding="utf-8"))
@@ -150,7 +141,7 @@ def build_weekly(root: Path, cfg: dict, now: dt.datetime) -> tuple[str, str]:
     lines.append("")
 
     # 六、用量
-    usage_path = root / "reports" / "usage.json"
+    usage_path = snap.root / "reports" / "usage.json"
     spent = month_spend(usage_path, now)
     budget = float(cfg.get("monthly_budget_usd", 3.0))
     lines.append("## 六、GLM 用量")
@@ -158,6 +149,11 @@ def build_weekly(root: Path, cfg: dict, now: dt.datetime) -> tuple[str, str]:
     lines.append(f"本月 ${spent:.2f} / 预算 ${budget:.2f}")
     lines.append("")
     return "\n".join(lines), title
+
+
+def build_weekly(root: Path, cfg: dict, now: dt.datetime) -> tuple[str, str]:
+    """兼容入口（golden/外部调用）。"""
+    return render_weekly(Snapshot.load(root, cfg, now))
 
 
 def glm_three_things(weekly_body: str, cfg: dict, api_key: str | None,
@@ -173,34 +169,12 @@ def glm_three_things(weekly_body: str, cfg: dict, api_key: str | None,
         "只从报告里已有的事项中挑优先级最高的，格式：\n1. …\n2. …\n3. …\n\n"
         + weekly_body
     )
-    payload = json.dumps({
-        "model": cfg.get("model", "glm-4-flash"),
-        "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                     {"role": "user", "content": prompt}],
-        "temperature": 0.3, "max_tokens": 300,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        GLM_URL, data=payload, method="POST",
-        headers={"Authorization": f"Bearer {api_key}",
-                 "Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        content = data["choices"][0]["message"]["content"].strip()
-        usage = data.get("usage", {})
-        price = float(cfg.get("price_per_1k_usd", 0.0))
-        est = (usage.get("total_tokens", 0) / 1000.0) * price
-        record = {"month": now.strftime("%Y-%m"), "ts": now.isoformat(timespec="seconds"),
-                  "model": cfg.get("model"), "prompt_tokens": usage.get("prompt_tokens"),
-                  "completion_tokens": usage.get("completion_tokens"),
-                  "est_cost_usd": round(est, 6)}
-        usage_path.parent.mkdir(parents=True, exist_ok=True)
-        with usage_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        return content
-    except Exception as exc:  # noqa: BLE001
-        print(f"[warn] three-things skipped: {exc}", file=sys.stderr)
-        return None
+    return call_glm(
+        cfg,
+        [{"role": "system", "content": SYSTEM_PROMPT},
+         {"role": "user", "content": prompt}],
+        api_key=api_key, usage_path=usage_path, now=now,
+        max_tokens=300, temperature=0.3, label="three-things")
 
 
 def main() -> int:
@@ -220,7 +194,7 @@ def main() -> int:
         print(f"[skip] {out.name} already exists")
         return 0
 
-    body, title = build_weekly(root, cfg, now)
+    body, _title = render_weekly(Snapshot.load(root, cfg, now))
 
     draft = glm_three_things(body, cfg, os.environ.get("GLM_API_KEY"),
                              root / "reports" / "usage.json", now)

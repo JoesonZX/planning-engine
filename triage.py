@@ -13,13 +13,11 @@ import datetime as dt
 import json
 import re
 import sys
-import urllib.request
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from parser import load_config
-
-GLM_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+from llm import call_glm, month_spend
 
 # 代码侧红线第一重：命中即 hold，不进 LLM
 PRIVATE_KEYWORDS = [
@@ -51,7 +49,6 @@ def classify_batch(items: list[str], targets: list[str], cfg: dict,
     """返回 {序号: 目标路径}；失败/超预算返回 None（调用方全部 hold）。"""
     if not api_key or not items:
         return None
-    from report import month_spend  # 复用预算检查
     budget = float(cfg.get("monthly_budget_usd", 3.0))
     if month_spend(usage_path, now) >= budget:
         print("[triage] budget reached, holding all", file=sys.stderr)
@@ -66,50 +63,22 @@ def classify_batch(items: list[str], targets: list[str], cfg: dict,
         '形如 [{"n":1,"target":"路径"},{"n":2,"target":"HOLD"}]。'
         "不合适归档的一律 HOLD。"
     )
-    payload = json.dumps({
-        "model": cfg.get("model", "glm-4-flash"),
-        "messages": [
-            {"role": "system", "content": CLASSIFY_SYSTEM},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0,
-        "max_tokens": 500,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        GLM_URL, data=payload, method="POST",
-        headers={"Authorization": f"Bearer {api_key}",
-                 "Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        content = data["choices"][0]["message"]["content"].strip()
-        usage = data.get("usage", {})
-        price = float(cfg.get("price_per_1k_usd", 0.0))
-        est = (usage.get("total_tokens", 0) / 1000.0) * price
-        record = {
-            "month": now.strftime("%Y-%m"),
-            "ts": now.isoformat(timespec="seconds"),
-            "model": cfg.get("model"),
-            "prompt_tokens": usage.get("prompt_tokens"),
-            "completion_tokens": usage.get("completion_tokens"),
-            "est_cost_usd": round(est, 6),
-        }
-        usage_path.parent.mkdir(parents=True, exist_ok=True)
-        with usage_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-        m = re.search(r"\[.*\]", content, re.S)
-        if not m:
-            return None
-        result: dict[int, str] = {}
-        for row in json.loads(m.group(0)):
-            n, target = int(row.get("n", 0)), str(row.get("target", "HOLD"))
-            result[n] = target
-        return result
-    except Exception as exc:  # noqa: BLE001 —— 失败 = 全部 hold
-        print(f"[warn] classify failed: {exc}", file=sys.stderr)
+    content = call_glm(
+        cfg,
+        [{"role": "system", "content": CLASSIFY_SYSTEM},
+         {"role": "user", "content": prompt}],
+        api_key=api_key, usage_path=usage_path, now=now,
+        max_tokens=500, temperature=0, timeout=60, label="classify")
+    if content is None:
         return None
+    m = re.search(r"\[.*\]", content, re.S)
+    if not m:
+        return None
+    result: dict[int, str] = {}
+    for row in json.loads(m.group(0)):
+        n, target = int(row.get("n", 0)), str(row.get("target", "HOLD"))
+        result[n] = target
+    return result
 
 
 # ---------------------------------------------------------------- 写入与重写

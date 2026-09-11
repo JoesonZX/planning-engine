@@ -14,7 +14,8 @@ import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from parser import generated_files, load_config, load_vault
+from parser import load_config
+from vault import Snapshot
 
 PAST_DAYS = 7
 FUTURE_DAYS = 120
@@ -84,11 +85,9 @@ def build_vevent(d: dt.date, text: str, star: bool, file: str, line: int,
     return lines
 
 
-def generate_ics(root: Path, cfg: dict, today: dt.date,
-                 now_utc: dt.datetime) -> bytes:
-    entries = load_vault(root, cfg, today=today)
-    excluded = generated_files(cfg)
-    entries = [e for e in entries if e.file not in excluded]
+def render_ics(snap: Snapshot, now_utc: dt.datetime) -> bytes:
+    entries = snap.entries
+    today = snap.today
 
     lo = today - dt.timedelta(days=PAST_DAYS)
     hi = today + dt.timedelta(days=FUTURE_DAYS)
@@ -124,6 +123,14 @@ def generate_ics(root: Path, cfg: dict, today: dt.date,
     return ("\r\n".join(physical) + "\r\n").encode("utf-8")
 
 
+def generate_ics(root: Path, cfg: dict, today: dt.date,
+                 now_utc: dt.datetime) -> bytes:
+    """兼容入口（test_ics/golden/外部调用）；today 由调用方注入。"""
+    snap = Snapshot.load(root, cfg)
+    snap.today = today
+    return render_ics(snap, now_utc)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="deadlines.ics generator")
     ap.add_argument("--vault", required=True)
@@ -131,11 +138,9 @@ def main() -> int:
     args = ap.parse_args()
     root = Path(args.vault).resolve()
     cfg = load_config(root)
-    tz = ZoneInfo(cfg["timezone"])
-    today = dt.datetime.now(tz).date()
     now_utc = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
 
-    data = generate_ics(root, cfg, today, now_utc)
+    data = render_ics(Snapshot.load(root, cfg), now_utc)
     out_path = root / args.out
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if out_path.exists() and out_path.read_bytes() == data:

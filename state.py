@@ -10,14 +10,11 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import re
-import subprocess
-import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from parser import generated_files, load_config, load_vault
-from report import file_last_commit_days
+from parser import load_config
+from vault import Snapshot
 
 
 def _item(e, today: dt.date) -> dict:
@@ -31,13 +28,11 @@ def _item(e, today: dt.date) -> dict:
     }
 
 
-def build_state(root: Path, cfg: dict, now: dt.datetime) -> dict:
-    today = now.date()
+def render_state(snap: Snapshot) -> dict:
+    today, cfg = snap.today, snap.cfg
     horizon_end = today + dt.timedelta(days=int(cfg["horizon_days"]))
-    entries = load_vault(root, cfg, today=today)
-    excluded = generated_files(cfg)
-    entries = [e for e in entries if e.file not in excluded]
-    file_ages = file_last_commit_days(root)
+    entries = snap.entries
+    file_ages = snap.file_ages
 
     today_items, week, stale_src = [], {}, []
     seen_week: set[str] = set()
@@ -52,37 +47,34 @@ def build_state(root: Path, cfg: dict, now: dt.datetime) -> dict:
                 week.setdefault(d.isoformat(), []).append(_item(e, today))
         if e.done is False:
             latest = max(e.dates) if e.dates else None
-            if (latest and (today - latest).days >= int(cfg["stale_days"])) or \
-               (not latest and (file_ages.get(e.file) or 0) >= int(cfg["stale_days"])):
+            if (latest and (today - latest).days >= snap.stale_days) or \
+               (not latest and (file_ages.get(e.file) or 0) >= snap.stale_days):
                 stale_src.append(e)
 
     stale = sorted(stale_src,
                    key=lambda e: -((today - max(e.dates)).days if e.dates
                                    else file_ages.get(e.file, 0)))
-    # timeline 归一化：config 里每行是 '- ["08:30", "标签"]' 字符串 → 解析成 [time, label]
-    timeline = []
-    for row in cfg.get("timeline", []):
-        if isinstance(row, str):
-            try:
-                row = json.loads(row)
-            except (json.JSONDecodeError, ValueError):
-                continue
-        if isinstance(row, (list, tuple)) and len(row) == 2:
-            timeline.append([str(row[0]), str(row[1])])
     return {
-        "generated_at": now.isoformat(timespec="seconds"),
+        "generated_at": snap.now.isoformat(timespec="seconds"),
         "today": today.isoformat(),
-        "timeline": timeline,
+        "timeline": snap.timeline,
         "today_items": sorted(today_items, key=lambda x: (not x["s"],)),
         "week": [{"date": d, "items": week[d]} for d in sorted(week)],
         "stale": [_item(e, today) for e in stale[:12]],
     }
 
 
+def build_state(root: Path, cfg: dict, now: dt.datetime) -> dict:
+    """兼容入口（golden/外部调用）。"""
+    return render_state(Snapshot.load(root, cfg, now))
+
+
 def build_stats(root: Path, cfg: dict, now: dt.datetime, days: int = 84) -> dict:
     """近 N 天每日：非 bot 提交数（c）与新增勾选数（x）。"""
+    import subprocess
+
+    from vault import BOT_NAMES
     since = (now - dt.timedelta(days=days)).strftime("%Y-%m-%d")
-    bot_names = {"planning-bot", "planning-bot@users.noreply.github.com"}
 
     def run(*args):
         try:
@@ -102,7 +94,7 @@ def build_stats(root: Path, cfg: dict, now: dt.datetime, days: int = 84) -> dict
         if len(parts) != 3:
             continue
         d, an, ae = parts
-        if an in bot_names or ae in bot_names:
+        if an in BOT_NAMES or ae in BOT_NAMES:
             continue
         counts.setdefault(d, {"c": 0, "x": 0})["c"] += 1
 
@@ -134,7 +126,8 @@ def main() -> int:
     cfg = load_config(root)
     now = dt.datetime.now(ZoneInfo(cfg["timezone"]))
 
-    state = build_state(root, cfg, now)
+    snap = Snapshot.load(root, cfg, now)
+    state = render_state(snap)
     stats = build_stats(root, cfg, now)
     (root / "reports" / "state.json").write_text(
         json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")

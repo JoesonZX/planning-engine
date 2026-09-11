@@ -13,15 +13,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import json
 import re
 import sys
-import urllib.request
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from parser import load_config
-from report import month_spend
+from llm import call_glm, month_spend
 from triage import is_private
 
 TITLE = "# profile · 用户画像（每周日随复盘更新）"
@@ -139,7 +137,6 @@ def _glm_revise(handwritten: str, old_agent: str, weekly_body: str,
         print("[profile] budget reached, keeping last version", file=sys.stderr)
         return None
 
-    from report import GLM_URL  # 局部导入避免 report ⇄ profile 环
     iso = now.date().isocalendar()
     user_prompt = (
         f"【今天是 {now:%Y-%m-%d}，ISO 周 W{iso[1]}——修订记录的日期以这个为准】\n\n"
@@ -149,36 +146,12 @@ def _glm_revise(handwritten: str, old_agent: str, weekly_body: str,
         "输出修订后的画像正文。只改有新证据的条目，其余原样保留，"
         f"末尾更新修订记录（- {now:%m-%d} W{iso[1]}: 一句说明）。"
     )
-    payload = json.dumps({
-        "model": cfg.get("model", "glm-4-flash"),
-        "messages": [{"role": "system", "content": PROFILE_SYSTEM},
-                     {"role": "user", "content": user_prompt}],
-        "temperature": 0.3,
-        "max_tokens": 600,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        GLM_URL, data=payload, method="POST",
-        headers={"Authorization": f"Bearer {api_key}",
-                 "Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        content = data["choices"][0]["message"]["content"].strip()
-        usage = data.get("usage", {})
-        price = float(cfg.get("price_per_1k_usd", 0.0))
-        est = (usage.get("total_tokens", 0) / 1000.0) * price
-        record = {"month": now.strftime("%Y-%m"), "ts": now.isoformat(timespec="seconds"),
-                  "model": cfg.get("model"), "prompt_tokens": usage.get("prompt_tokens"),
-                  "completion_tokens": usage.get("completion_tokens"),
-                  "est_cost_usd": round(est, 6)}
-        usage_path.parent.mkdir(parents=True, exist_ok=True)
-        with usage_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        return content
-    except Exception as exc:  # noqa: BLE001 —— 失败 = 保持上周版
-        print(f"[warn] profile revision skipped: {exc}", file=sys.stderr)
-        return None
+    return call_glm(
+        cfg,
+        [{"role": "system", "content": PROFILE_SYSTEM},
+         {"role": "user", "content": user_prompt}],
+        api_key=api_key, usage_path=usage_path, now=now,
+        max_tokens=600, temperature=0.3, timeout=60, label="profile")
 
 
 def update_profile(root: Path, cfg: dict, api_key: str | None,
