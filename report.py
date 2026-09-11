@@ -390,20 +390,29 @@ def build_dashboard(root: Path, cfg: dict, now: dt.datetime) -> str:
 
 # ---------------------------------------------------------------- 入口
 
+BOT_NAMES = {"planning-bot", "planning-bot@users.noreply.github.com"}
+
+
 def vault_quiet(root: Path) -> bool:
     """24h 内无非 bot 提交 → vault 无变化，跳过 GLM 摘要（省钱省幂）。
 
-    即：每一条提交都是 bot 的才算安静；没有任何提交也视为安静。
-    （v3 上线时比较符写反：活跃日被当安静日跳过摘要——v4 端到端测试抓出）
+    bot 判定用名字/邮箱精确匹配（与 state.py 统计同口径）。
+    git 查询失败 → 返回 False（无法判断时保守生成摘要，宁可多花不漏摘要）。
+    （v3 上线时比较逻辑写反：活跃日被当安静日跳过摘要——v4 端到端测试抓出）
     """
     try:
-        log = subprocess.run(
+        proc = subprocess.run(
             ["git", "-C", str(root), "log", "--since=24 hours ago",
              "--pretty=format:%an|%ae"],
-            capture_output=True, text=True, timeout=30, check=True).stdout
+            capture_output=True, text=True, timeout=30, check=True)
     except (subprocess.SubprocessError, OSError):
         return False
-    return all("planning-bot" in line for line in log.splitlines() if line)
+
+    def _is_bot(line: str) -> bool:
+        name, _, email = line.partition("|")
+        return name in BOT_NAMES or email in BOT_NAMES
+
+    return all(_is_bot(line) for line in proc.stdout.splitlines() if line)
 
 
 def main() -> int:
