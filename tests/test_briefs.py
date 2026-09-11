@@ -87,8 +87,8 @@ class TestGenerate(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def _gen(self, mock_resp):
-        with mock.patch("briefs.call_glm", return_value=mock_resp):
+    def _gen(self, mock_resp, mock_data=None):
+        with mock.patch("briefs.call_glm", return_value=(mock_resp, mock_data)):
             return generate_brief(self.entry, self.root, CFG, "key",
                                   self.root / "u.json", NOW, "ceofei")
 
@@ -99,8 +99,17 @@ class TestGenerate(unittest.TestCase):
         self.assertIn("任务简报", body)
 
     def test_no_citation_dropped(self):
-        self.assertIsNone(self._gen(NO_CITE))
+        self.assertIsNone(self._gen(NO_CITE, {}))
         self.assertFalse((self.root / "reports/briefs").exists())
+
+    def test_links_from_response_data_accepted_and_appended(self):
+        # bigmodel 联网对话的 URL 在响应数据的 search_result 里，正文只有 ref_N 引用
+        data = {"search_result": [{"title": "DMV REAL ID", "link": "https://www.dmv.ca.gov/real-id"}]}
+        fname = self._gen(NO_CITE, data)
+        self.assertEqual(fname, "ceofei.md")
+        body = (self.root / "reports/briefs/ceofei.md").read_text(encoding="utf-8")
+        self.assertIn("## 来源（检索结果）", body)
+        self.assertIn("https://www.dmv.ca.gov/real-id", body)
 
     def test_fences_stripped(self):
         fname = self._gen(f"```markdown\n{GOOD_BRIEF}```")
@@ -121,7 +130,7 @@ class TestRun(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_run_generates_and_is_idempotent(self):
-        with mock.patch("briefs.call_glm", return_value=GOOD_BRIEF):
+        with mock.patch("briefs.call_glm", return_value=(GOOD_BRIEF, {})):
             made = run(self.root, CFG, "key", self.root / "u.json", NOW)
             self.assertEqual(len(made), 1)
             with mock.patch("briefs.call_glm") as m2:

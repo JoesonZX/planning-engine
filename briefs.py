@@ -138,13 +138,34 @@ def _strip_fences(text: str) -> str:
     return (m.group(1) if m else text).strip()
 
 
+def _extract_links(data: dict) -> list[tuple[str, str]]:
+    """从响应数据里收集 (标题, 链接)——web_search 的引用在响应数据里，不在正文。"""
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            link = node.get("link") or node.get("url")
+            if isinstance(link, str) and link.startswith("http") and link not in seen:
+                seen.add(link)
+                out.append((str(node.get("title") or link), link))
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(data)
+    return out
+
+
 def generate_brief(entry, root: Path, cfg: dict, api_key: str | None,
                    usage_path: Path, now: dt.datetime, slug: str) -> str | None:
     """生成并落盘一份简报；返回文件名，失败/不可信返回 None。"""
     if not api_key:
         return None
     dates = "、".join(d.strftime("%m/%d") for d in entry.dates) or "无"
-    content = call_glm(
+    content, data = call_glm(
         cfg,
         [{"role": "system", "content": BRIEF_SYSTEM},
          {"role": "user", "content":
@@ -153,14 +174,20 @@ def generate_brief(entry, root: Path, cfg: dict, api_key: str | None,
           f"今天是 {now:%Y-%m-%d}。生成简报正文。"}],
         api_key=api_key, usage_path=usage_path, now=now,
         max_tokens=1500, temperature=0.2, timeout=90, label="brief",
-        tools=SEARCH_TOOLS)
+        tools=SEARCH_TOOLS, return_full=True)
     if not content:
         return None
     content = _strip_fences(content)
-    # 信任闸：没有检索证据（≥1 个 URL）的简报不落盘
-    if "http" not in content:
-        print("[briefs] guard: no citation in output, dropping", file=sys.stderr)
+    links = _extract_links(data or {})
+    # 信任闸：正文无 URL 且响应无检索结果 = 没有联网证据，不落盘（宁可缺不编造）
+    if "http" not in content and not links:
+        print(f"[briefs] guard: no citation (head={content[:60]!r}), dropping",
+              file=sys.stderr)
         return None
+    if links and "http" not in content:
+        # 正文引用是 [来源：ref_N] 式的 → 把真实链接补成来源区
+        src = "\n".join(f"- [{t}]({u})" for t, u in links[:8])
+        content += f"\n\n## 来源（检索结果）\n{src}\n"
     rel = f"{BRIEFS_DIR}/{slug}.md"
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)

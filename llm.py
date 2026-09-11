@@ -48,16 +48,32 @@ def _record_usage(usage: dict, cfg: dict, usage_path: Path,
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def _collect_links(node, out: list) -> None:
+    """递归收集响应里所有 link/url 字段（web_search 结果的确切位置随版本变）。"""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in ("link", "url") and isinstance(v, str) and v.startswith("http"):
+                out.append(v)
+            else:
+                _collect_links(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _collect_links(v, out)
+
+
 def call_glm(cfg: dict, messages: list[dict], *, api_key: str | None,
              usage_path: Path, now: dt.datetime, max_tokens: int,
              temperature: float, timeout: int = 45, label: str = "glm",
-             tools: list[dict] | None = None) -> str | None:
+             tools: list[dict] | None = None,
+             return_full: bool = False):
     """单轮补全。失败/无 key 返回 None（确定性产物不受影响）。
 
-    tools：可选的服务端工具（目前用于 web_search 联网检索，见 briefs.py）。
+    tools：可选的服务端工具（web_search 联网检索，见 briefs.py）。
+    return_full=True 时返回 (content, 完整响应 dict)——调用方需要
+    search_result 引用列表时用（引用在响应数据里，不在正文中）。
     """
     if not api_key:
-        return None
+        return (None, None) if return_full else None
     payload: dict = {
         "model": cfg.get("model", "glm-4-flash"),
         "messages": messages,
@@ -77,7 +93,7 @@ def call_glm(cfg: dict, messages: list[dict], *, api_key: str | None,
             data = json.loads(resp.read().decode("utf-8"))
         content = data["choices"][0]["message"]["content"].strip()
         _record_usage(data.get("usage", {}), cfg, usage_path, now)
-        return content
+        return (content, data) if return_full else content
     except Exception as exc:  # noqa: BLE001
         print(f"[warn] {label} skipped: {exc}", file=sys.stderr)
-        return None
+        return (None, None) if return_full else None
