@@ -15,10 +15,12 @@ from zoneinfo import ZoneInfo
 
 from parser import load_config
 from vault import Snapshot
+import briefs
+from distill import rule_na
 
 
-def _item(e, today: dt.date) -> dict:
-    return {
+def _item(e, today: dt.date, brief: str | None = None) -> dict:
+    item = {
         "t": e.text,
         "s": e.star,
         "d": e.done,
@@ -26,6 +28,12 @@ def _item(e, today: dt.date) -> dict:
         "l": e.line,
         "dates": [d.isoformat() for d in e.dates],
     }
+    na = rule_na(e.text)
+    if na != e.text:
+        item["na"] = na  # 稀疏字段：仅长行蒸馏时出现
+    if brief:
+        item["brief"] = f"{briefs.BRIEFS_DIR}/{brief}"
+    return item
 
 
 def render_state(snap: Snapshot) -> dict:
@@ -33,18 +41,24 @@ def render_state(snap: Snapshot) -> dict:
     horizon_end = today + dt.timedelta(days=int(cfg["horizon_days"]))
     entries = snap.entries
     file_ages = snap.file_ages
+    index = briefs.load_index(snap.root)
+
+    def _brief_of(e) -> str | None:
+        meta = index.get(briefs.task_key(e.file, e.raw))
+        return meta.get("file") if meta else None
 
     today_items, week, stale_src = [], {}, []
     seen_week: set[str] = set()
     for e in entries:
+        b = _brief_of(e)
         if today in e.dates:
-            today_items.append(_item(e, today))
+            today_items.append(_item(e, today, b))
         future = sorted(d for d in e.dates if today < d <= horizon_end)
         if future:
             d = future[0]
             if (e.file, e.line) not in seen_week:
                 seen_week.add((e.file, e.line))
-                week.setdefault(d.isoformat(), []).append(_item(e, today))
+                week.setdefault(d.isoformat(), []).append(_item(e, today, b))
         if e.done is False:
             latest = max(e.dates) if e.dates else None
             if (latest and (today - latest).days >= snap.stale_days) or \

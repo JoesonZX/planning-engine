@@ -15,6 +15,8 @@ from zoneinfo import ZoneInfo
 
 from parser import Entry, load_config
 from vault import Snapshot, vault_quiet
+from distill import rule_na
+import briefs
 
 # llm 置于 vault 之后导入（无环；仅为可读性）
 from llm import call_glm, month_spend  # noqa: E402
@@ -26,8 +28,28 @@ def _fmt_day(d: dt.date) -> str:
     return f"{d.month}/{d.day} 周{WEEKDAY_CN[d.weekday()]}"
 
 
-def _li(entry: Entry) -> str:
-    return f"- {entry.display}"
+def _li(entry: Entry, brief: str = "") -> str:
+    """条目行：>60 字的文本蒸馏为下一步动作（仅展示层，源文件不动）+ 简报链接。"""
+    line = f"- {entry.display}"
+    na = rule_na(entry.text)
+    if na != entry.text:
+        line = line.replace(entry.text, na, 1)
+    if brief:
+        line += f" → 📋 简报：`{briefs.BRIEFS_DIR}/{brief}`"
+    return line
+
+
+def _brief_lookup(snap: Snapshot, entries: list[Entry]) -> dict[int, str]:
+    """{id(entry): 简报文件名}——索引为空时零开销。"""
+    index = briefs.load_index(snap.root)
+    if not index:
+        return {}
+    out: dict[int, str] = {}
+    for e in entries:
+        meta = index.get(briefs.task_key(e.file, e.raw))
+        if meta and meta.get("file"):
+            out[id(e)] = meta["file"]
+    return out
 
 
 def collect_stale(snap: Snapshot) -> list[str]:
@@ -65,11 +87,12 @@ def render_report(snap: Snapshot) -> str:
     # 一、明日事项
     tomorrow_items = [e for e in entries if any(d == tomorrow for d in e.dates)]
     tomorrow_items.sort(key=lambda e: (not e.star, e.file, e.line))
+    briefs_map = _brief_lookup(snap, entries)
     lines.append(f"## 一、明日事项（{_fmt_day(tomorrow)}）")
     lines.append("")
     if tomorrow_items:
         for e in tomorrow_items:
-            lines.append(_li(e))
+            lines.append(_li(e, briefs_map.get(id(e), "")))
     else:
         lines.append("（明天没有标注日期的事项——顺手把明天的锚点写进清单？）")
     lines.append("")
@@ -93,7 +116,7 @@ def render_report(snap: Snapshot) -> str:
                 lines.append(f"### {_fmt_day(d)}")
                 lines.append("")
                 last_day = d
-            lines.append(_li(e))
+            lines.append(_li(e, briefs_map.get(id(e), "")))
     else:
         lines.append("（未来一周没有死线）")
     lines.append("")
@@ -224,10 +247,11 @@ def render_dashboard(snap: Snapshot) -> str:
 
     today_items = [e for e in entries if any(d == today for d in e.dates)]
     today_items.sort(key=lambda e: (not e.star, e.file))
+    briefs_map = _brief_lookup(snap, entries)
     lines.append("## ✅ 今天")
     lines.append("")
     if today_items:
-        lines.extend(_li(e) for e in today_items)
+        lines.extend(_li(e, briefs_map.get(id(e), "")) for e in today_items)
     else:
         lines.append("（今天没有标注事项）")
     lines.append("")
@@ -246,7 +270,7 @@ def render_dashboard(snap: Snapshot) -> str:
             if d != last:
                 lines.append(f"**{_fmt_day(d)}**")
                 last = d
-            lines.append(_li(e))
+            lines.append(_li(e, briefs_map.get(id(e), "")))
     else:
         lines.append("（未来一周没有死线）")
     lines.append("")

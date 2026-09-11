@@ -50,18 +50,25 @@ def _record_usage(usage: dict, cfg: dict, usage_path: Path,
 
 def call_glm(cfg: dict, messages: list[dict], *, api_key: str | None,
              usage_path: Path, now: dt.datetime, max_tokens: int,
-             temperature: float, timeout: int = 45, label: str = "glm") -> str | None:
-    """单轮补全。失败/无 key 返回 None（确定性产物不受影响）。"""
+             temperature: float, timeout: int = 45, label: str = "glm",
+             tools: list[dict] | None = None) -> str | None:
+    """单轮补全。失败/无 key 返回 None（确定性产物不受影响）。
+
+    tools：可选的服务端工具（目前用于 web_search 联网检索，见 briefs.py）。
+    """
     if not api_key:
         return None
-    payload = json.dumps({
+    payload: dict = {
         "model": cfg.get("model", "glm-4-flash"),
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
-    }).encode("utf-8")
+    }
+    if tools:
+        payload["tools"] = tools
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        GLM_URL, data=payload, method="POST",
+        GLM_URL, data=body, method="POST",
         headers={"Authorization": f"Bearer {api_key}",
                  "Content-Type": "application/json"},
     )
