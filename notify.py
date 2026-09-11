@@ -42,6 +42,11 @@ def summary_from_report(path: Path, kind: str, max_lines: int = 3) -> str:
     return "\n".join(lines)
 
 
+def latest_week_report(root: Path) -> Path | None:
+    weeks = sorted((root / "reports").glob("week-*.md"))
+    return weeks[-1] if weeks else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--vault", required=True)
@@ -70,9 +75,11 @@ def main() -> int:
         print("[warn] VAPID_PRIVATE_KEY missing", file=sys.stderr)
         return 0
 
-    body = args.msg or summary_from_report(
-        root / ("reports/week-" + ("0000" if args.kind == "weekly" else "") + ".md"
-                if args.kind == "weekly" else "reports/tomorrow.md"), args.kind)
+    if args.kind == "weekly":
+        week_file = latest_week_report(root)
+        body = args.msg or (summary_from_report(week_file, args.kind) if week_file else "周复盘已生成")
+    else:
+        body = args.msg or summary_from_report(root / "reports/tomorrow.md", args.kind)
 
     try:
         from pywebpush import webpush, WebPushException
