@@ -121,8 +121,10 @@ def is_candidate(entry, today: dt.date, horizon_days: int = 7) -> bool:
 
 
 def slugify(text: str, taken: set[str]) -> str:
-    base = re.sub(r"[^\w\u4e00-\u9fff]+", "",
-                  clean_task_text(text))[:24] or "brief"
+    from distill import rule_na
+    base_src = rule_na(clean_task_text(text))          # 蒸馏出动作段再做文件名
+    base_src = re.sub(r"^[\d.／/\-–—]+\s*", "", base_src)  # 剥行首日期
+    base = re.sub(r"[^\w\u4e00-\u9fff]+", "", base_src)[:20] or "brief"
     slug, n = base, 2
     while slug in taken:
         slug = f"{base}-{n}"
@@ -171,7 +173,9 @@ def generate_brief(entry, root: Path, cfg: dict, api_key: str | None,
          {"role": "user", "content":
           f"任务：{clean_task_text(entry.raw)}\n"
           f"来源文件：{entry.file}\n相关日期：{dates}\n"
-          f"今天是 {now:%Y-%m-%d}。生成简报正文。"}],
+          f"今天是 {now:%Y-%m-%d}。生成简报正文。"
+          "（必须先使用 web_search 检索官方信息再作答，至少检索一次；"
+          "正文中的关键事实引用检索到的真实链接。）"}],
         api_key=api_key, usage_path=usage_path, now=now,
         max_tokens=1500, temperature=0.2, timeout=90, label="brief",
         tools=SEARCH_TOOLS, return_full=True)
