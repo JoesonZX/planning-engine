@@ -6,17 +6,30 @@
 
 ## 它做什么
 
+管线分两层：**加载层一次读全库，产出层各自渲染**。
+
+### 加载层（公共前半段）
+
 - `parser.py` — 最小语法解析器（冻结语法）：
   - checkbox：`- [ ]` / `- [x]`
   - 行内日期：`M/D` 或 `M.D`（带防御：小数、版本号、时间不会被误认）
   - `⭐` 硬节点标记
-- `report.py` — 晚间报告（`tomorrow.md`）六大板块 + 根目录 `仪表盘.md`；可选 GLM「今晚摘要」（预算帽 $3/月，超帽自动降频为周日一次）
+- `vault.py` — `Snapshot`：vault + git 历史的一次性惰性加载（条目/文件年龄/inbox/24h 勾选/近 7 天改动/时间线），全部产出物共享；附 git 辅助与 quiet 门
+- `llm.py` — 全引擎唯一的 GLM 请求/usage 记账/容错；预算帽规则留在各调用方（晚报周日豁免，其余一刀切）
+
+### 产出层（吃 Snapshot 的 render 函数）
+
+- `report.py` — 晚间报告（`tomorrow.md`）六大板块 + 根目录 `仪表盘.md`；可选 GLM「今晚摘要」（注入 `profile.md` 画像，预算帽 $3/月，超帽自动降频为周日一次）
 - `triage.py` — 周日 20:00 inbox 分拣：私人内容（情绪/感情关键词）代码侧拦截、LLM 拿不准强制 HOLD、白名单校验三重防御；失败 = 全部 hold，数据永不丢失
-- `weekly_review.py` — 周复盘 `week-YYYY-Www.md` 七板块（只统计不评判）+ GLM 起草「下周三件事」
+- `weekly_review.py` — 周复盘 `week-YYYY-Www.md` 七板块（只统计不评判）+ GLM 起草「下周三件事」+ 顺带维护画像
+- `profile.py` — 用户画像 `profile.md`（每周日随复盘更新）：手写区代码级回填、红线关键词、结构白名单、行数上限四重守卫，任何失败保持上周版
 - `ics.py` — 每晚生成 `reports/deadlines.ics`（⭐ 硬节点与未来日期 → 全天事件 + 前一天提醒），导入手机日历即得系统级通知
-- `.github/workflows/evening.yml` — reusable：每晚 21:00（PT）报告 + 仪表盘
-- `.github/workflows/weekly.yml` — reusable：周日 20:00（PT）分拣 + 周复盘
+- `.github/workflows/evening.yml` — reusable：每晚 21:00（PT）报告 + 仪表盘（data 检出须 `fetch-depth: 0`，quiet 门/滑落/完成数/stats 都依赖 git 历史）
+- `.github/workflows/weekly.yml` — reusable：周日 20:00（PT）分拣 + 周复盘 + 画像维护
 - 两个 workflow 都由数据仓调用，用调用方自带 `GITHUB_TOKEN` 提交，无需任何 PAT
+
+**加一个新产出物** = 写一个 `render_x(snap)` 函数 + 一行 CLI，不再复制加载逻辑。
+重构/加功能前先跑 `python tests/capture_golden.py` 固化当前输出，改完 `unittest` 比对。
 
 ## 接入你的 vault
 
@@ -52,6 +65,7 @@
 ## 本地开发
 
 ```bash
-python -m unittest discover -s tests      # 单测
+python -m unittest discover -s tests      # 单测 + golden（快照超 48h 自动 skip）
+python tests/capture_golden.py            # 重构前固化当前输出（golden 快照）
 python report.py --vault /path/to/data --force   # 本地强制生成
 ```
