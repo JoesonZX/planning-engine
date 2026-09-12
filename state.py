@@ -13,7 +13,13 @@ import json
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from parser import dedup_entries, load_config
+import re
+
+from parser import dedup_entries, expand_schedule, load_config
+
+# 日程资格：表格行 / 引用行 / 日期开头行 / 显式全角竖线分段行。
+# 备注子弹（- 开头）、标题加粗（** 开头）是笔记，不算日程（v8 噪音过滤）
+SCHED_LEAD = re.compile(r"^(?:[|>]|\d{1,2}[./]\d{1,2}(?!\d))")
 from vault import Snapshot
 import briefs
 from distill import rule_na
@@ -44,7 +50,8 @@ def render_state(snap: Snapshot) -> dict:
     # 任务（checkbox，可勾可统计）与日程（表格/普通日期行，只按日展示）彻底分离（v7）
     all_entries = dedup_entries(snap.entries)
     entries = [e for e in all_entries if e.done is not None]          # 任务
-    schedule = [e for e in all_entries if e.done is None and e.dates]  # 日程
+    schedule = [e for e in all_entries if e.done is None and e.dates
+                and (SCHED_LEAD.search(e.raw.lstrip()) or "｜" in e.raw)]  # 日程
     file_ages = snap.file_ages
     index = briefs.load_index(snap.root)
 
@@ -58,6 +65,17 @@ def render_state(snap: Snapshot) -> dict:
                          key=lambda e: e.dates)
     sched_week: dict[str, list] = {}
     for e in schedule:
+        # v8：日程 blob 行（「SD 9.11–9.14 ｜ Joshua Tree 9.15 ｜ …」）逐日展开；
+        # 表格行与普通行退回「首个未来日期」原行为
+        expanded = expand_schedule(e.raw, today) if not e.raw.lstrip().startswith("|") else []
+        if len(expanded) >= 1:
+            for d, seg in expanded:
+                if today <= d <= horizon_end:
+                    it = _item(e, today)
+                    it["t"] = seg
+                    it["seg"] = True
+                    sched_week.setdefault(d.isoformat(), []).append(it)
+            continue
         future = sorted(d for d in e.dates if today < d <= horizon_end)
         if future:
             sched_week.setdefault(future[0].isoformat(), []).append(_item(e, today))

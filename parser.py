@@ -14,7 +14,7 @@ from __future__ import annotations
 import calendar
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 # 日期主体：M/D 或 M.D；左右边界都不是数字或点
@@ -69,11 +69,13 @@ def pick_year(month: int, day: int, today: date, horizon: int = 200) -> date:
 
     vault 是滚动规划的（12 月的文件写在 12 月，1 月读仍是"今年"），
     用绝对距离而不是简单进位，保证任何月份写下时都解析回作者本意。
+    day 下界钳到 1（宽松提取可能给出 2.0 这类非日期数字——v7 复查事故）。
     """
+    month = min(max(month, 1), 12)
     candidates = []
     for year in (today.year - 1, today.year, today.year + 1):
         last = calendar.monthrange(year, month)[1]
-        candidates.append(date(year, month, min(day, last)))
+        candidates.append(date(year, month, max(1, min(day, last))))
     candidates.sort(key=lambda d: abs((d - today).days))
     nearest = candidates[0]
     # 超出视野的"最近日期"通常是解析噪音，返回它但调用方可用 horizon 过滤
@@ -250,6 +252,56 @@ def _extend_block(path: Path, cfg: dict) -> dict:
         if bm and current and isinstance(cfg[current], list):
             cfg[current].append(bm.group(1).strip().strip("\"'"))
     return cfg
+
+
+def expand_schedule(text: str, today: date) -> list:
+    """日程 blob 行逐日展开（v8）：按全角/半角竖线分段，段内日期（含区间）展开成天。
+
+    返回 [(date, 段文本)]。用宽松日期提取（不受版本号防御限制——「SD 9.11」
+    「Tree 9.15」是行程不是版本号）；显式区间（9.11-9.14）补齐中间天；
+    括号内的日期（如「（9/7 定）」）视为元数据跳过；无日期的段丢弃；
+    表格行（以 | 开头）不适用本函数（另有首格归因）。
+    """
+    if text.lstrip().startswith("|"):
+        return []
+    relaxed = re.compile(r"(?<![\d.])(\d{1,2})[./](\d{1,2})(?![\d.])")
+    rng = re.compile(r"(\d{1,2})[./](\d{1,2})\s*[-–—]\s*(\d{1,2})[./](\d{1,2})")
+    out: list = []
+    for seg in re.split(r"[｜|]", text):
+        seg = seg.strip()
+        if not seg:
+            continue
+        # 段展示文本：剥引用符、前导括注（如「（9/7 定）：」）与前导日期
+        seg_show = re.sub(r"^>\s*", "", seg)
+        seg_show = re.sub(r"^（[^）]*）[:：]?\s*", "", seg_show)
+        seg_show = re.sub(r"^[\d.]{1,6}\s+", "", seg_show).strip() or seg
+        taken: list = []
+        days: list = []
+        consumed: list = []
+        for rm in rng.finditer(seg):
+            a = pick_year(int(rm.group(1)), int(rm.group(2)), today)
+            b = pick_year(int(rm.group(3)), int(rm.group(4)), today)
+            if not (1 <= (b - a).days <= 31):
+                continue
+            consumed.extend([rm.start(1), rm.start(3)])
+            taken.append((a, rm.start(1)))
+            cur = a
+            while cur <= b:
+                days.append(cur)
+                cur += timedelta(days=1)
+        for dm in relaxed.finditer(seg):
+            mo, dy = int(dm.group(1)), int(dm.group(2))
+            if not (1 <= mo <= 12 and 1 <= dy <= 31):
+                continue  # 2.0 / 13.5 这类非日期数字（v7 复查：day=0 崩 pick_year）
+            if any(abs(dm.start() - c) <= 1 for c in consumed):
+                continue
+            before = seg[:dm.start()].rstrip()
+            if before.endswith(("（", "(")):
+                continue  # 括号内的注释日期（如「（9/7 定）」）是元数据
+            days.append(pick_year(mo, dy, today))
+        for d in sorted(set(days)):
+            out.append((d, seg_show))
+    return out
 
 
 def generated_files(cfg: dict) -> set[str]:
