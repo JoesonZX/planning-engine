@@ -54,7 +54,8 @@ def render_state(snap: Snapshot) -> dict:
 
     today_items, week, stale_src = [], {}, []
     seen_week: set[str] = set()
-    sched_today = [e for e in schedule if today in e.dates]
+    sched_today = sorted([e for e in schedule if today in e.dates],
+                         key=lambda e: e.dates)
     sched_week: dict[str, list] = {}
     for e in schedule:
         future = sorted(d for d in e.dates if today < d <= horizon_end)
@@ -91,7 +92,7 @@ def render_state(snap: Snapshot) -> dict:
         "today": today.isoformat(),
         "timeline": snap.timeline,
         "today_items": sorted(today_items, key=lambda x: (not x["s"],)),
-        "sched_today": sorted(sched_today, key=lambda e: e.dates),
+        "sched_today": [_item(e, today) for e in sched_today],
         "week": week_out,
         "stale": [_item(e, today) for e in stale[:12]],
     }
