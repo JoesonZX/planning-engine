@@ -1,0 +1,46 @@
+name: daily state refresh (reusable)
+on:
+  workflow_call:
+
+jobs:
+  state:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout data vault (caller repo)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # stats.json 的热力图统计依赖 git 历史
+
+      - name: Checkout engine
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/planning-engine
+          ref: main
+          path: engine
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run engine unit tests
+        run: python -m unittest discover -s engine/tests
+
+      - name: Refresh state/stats/ics
+        run: |
+          git config user.name "planning-bot"
+          git config user.email "planning-bot@users.noreply.github.com"
+          python engine/state.py --vault .
+          python engine/ics.py --vault . --out reports/deadlines.ics
+
+      - name: Commit
+        run: |
+          git add reports/
+          if ! git diff --cached --quiet; then
+            git commit -m "daily state refresh $(TZ=America/Los_Angeles date +%F)"
+            git pull --rebase --quiet || true
+            git push
+          else
+            echo "state unchanged, nothing to commit"
+          fi
