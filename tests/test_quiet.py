@@ -19,10 +19,13 @@ from report import vault_quiet  # noqa: E402
 
 
 def _git(root: Path, *args: str, env_extra: dict | None = None) -> None:
+    # 提交时间相对「现在」——硬编码日期跨天就掉出 24h 窗口（v6 事故同款：
+    # golden 也是这么过期的），quiet 判定依赖 --since=24h 必须用相对时间
+    import datetime as dt
     import os
+    stamp = (dt.datetime.now() - dt.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S %z")
     env = dict(os.environ)
-    env.update({"GIT_AUTHOR_DATE": "2026-09-11T10:00:00 -0700",
-                "GIT_COMMITTER_DATE": "2026-09-11T10:00:00 -0700"})
+    env.update({"GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp})
     if env_extra:
         env.update(env_extra)
     subprocess.run(["git", "-C", str(root), *args], check=True,
