@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from parser import Entry, load_config
+from parser import Entry, dedup_entries, load_config
 from vault import Snapshot, vault_quiet
 from distill import rule_na
 import briefs
@@ -53,9 +53,9 @@ def _brief_lookup(snap: Snapshot, entries: list[Entry]) -> dict[int, str]:
 
 
 def collect_stale(snap: Snapshot) -> list[str]:
-    """滑落项：过期 ≥stale_days 的带日期任务 + 文件陈旧的无日期任务。"""
+    """滑落项：过期 ≥stale_days 的带日期任务 + 文件陈旧的无日期任务（语义去重后）。"""
     stale: list[str] = []
-    for e in snap.entries:
+    for e in dedup_entries(snap.entries):
         if e.done is not False:
             continue
         latest = max(e.dates) if e.dates else None
@@ -76,7 +76,7 @@ def render_report(snap: Snapshot) -> str:
     tomorrow = today + dt.timedelta(days=1)
     horizon_end = tomorrow + dt.timedelta(days=int(cfg["horizon_days"]))
 
-    entries = snap.entries
+    entries = dedup_entries(snap.entries)
 
     lines: list[str] = []
     lines.append(f"# 🌙 晚间报告 · 明天 {_fmt_day(tomorrow)}")
@@ -237,7 +237,7 @@ def render_dashboard(snap: Snapshot) -> str:
     cfg, today, now = snap.cfg, snap.today, snap.now
     horizon_end = today + dt.timedelta(days=int(cfg["horizon_days"]))
 
-    entries = snap.entries
+    entries = dedup_entries(snap.entries)
 
     lines: list[str] = []
     lines.append(f"# 🧭 仪表盘 · {_fmt_day(today)} {now:%H:%M}")

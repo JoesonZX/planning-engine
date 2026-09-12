@@ -140,6 +140,32 @@ def render_weekly(snap: Snapshot) -> tuple[str, str]:
     lines.append(f"⏳ 待人工 **{held_n}** 条" + (f" ｜ {triage_info}" if triage_info else ""))
     lines.append("")
 
+    # 五点五、本周日记（行为摘要）——只提取「做了什么」节；感受区代码级排除
+    diary_lines: list[str] = []
+    diary_dir = snap.root / "日记"
+    if diary_dir.exists():
+        for i in range(7):
+            d = week_start + dt.timedelta(days=i)
+            p = diary_dir / f"{d.isoformat()}.md"
+            if not p.exists():
+                continue
+            try:
+                txt = p.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            m = re.search(r"\*\*做了什么\*\*\n([\s\S]*?)(?:\n\*\*|$)", txt)
+            if not m:
+                continue
+            items = [ln.strip().lstrip("- ").strip()
+                     for ln in m.group(1).splitlines() if ln.strip().startswith("-")]
+            if items:
+                diary_lines.append(f"**{d.month}/{d.day}** " + "；".join(items))
+    if diary_lines:
+        lines.append("## 五点五、本周日记（做了什么）")
+        lines.append("")
+        lines.extend(f"- {x}" for x in diary_lines)
+        lines.append("")
+
     # 六、用量
     usage_path = snap.root / "reports" / "usage.json"
     spent = month_spend(usage_path, now)

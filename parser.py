@@ -40,6 +40,7 @@ class Entry:
     done: bool | None  # 仅 checkbox 行有值
     star: bool
     dates: list[date] = field(default_factory=list)
+    src: list = field(default_factory=list)  # [(file,line)] 语义去重后的全部来源（v7）
 
     @property
     def display(self) -> str:
@@ -142,7 +143,17 @@ def parse_markdown(text: str, file: str = "", today: date | None = None) -> list
             content = line
 
         has_star = "⭐" in line
-        dates = extract_dates(content, today)
+        # 表格行：日期归因取「从左到右第一个含日期的单元格」（如 | 9.17 三 | …）——
+        # 其后单元格里的日期（正文提到的火车票日、截止日）不再把整行拖去别的日子（v7）
+        if content.startswith("|"):
+            cells0 = [c.strip() for c in content.strip().strip("|").split("|")]
+            dates = []
+            for c in cells0:
+                dates = extract_dates(c, today)
+                if dates:
+                    break
+        else:
+            dates = extract_dates(content, today)
 
         # 展示降噪（在日期提取之后：日期格可以安全丢弃）
         if content.startswith("|"):
@@ -184,7 +195,7 @@ def load_config(root: Path) -> dict:
         "horizon_days": 7,
         "stale_days": 14,
         "skip_files": [],
-        "skip_dirs": [".git", "reports", ".github", "engine"],
+        "skip_dirs": [".git", "reports", ".github", "engine", "日记"],
         "inbox_file": "inbox.md",
         "dashboard_file": "仪表盘.md",
         "profile_file": "profile.md",
@@ -249,6 +260,29 @@ def generated_files(cfg: dict) -> set[str]:
     return {cfg.get("inbox_file", "inbox.md"),
             cfg.get("dashboard_file", "仪表盘.md"),
             cfg.get("profile_file", "profile.md")}
+
+
+def norm_text(t: str) -> str:
+    """条目语义键：去空白与 markdown 记号——跨文件去重用（v7）。"""
+    s = re.sub(r"\s+", "", t)
+    return re.sub(r"[*_`#>|（）()【】\[\]]", "", s)
+
+
+def dedup_entries(entries: list) -> list:
+    """语义去重：clean 文本相同的条目合并为一条，重复来源记入 .src（file,line 对）。
+
+    主来源优先取含「执行清单」的文件（任务的主家），其余按 file/line 稳定排序。
+    """
+    pri = sorted(entries, key=lambda e: (0 if "执行清单" in e.file else 1, e.file, e.line))
+    out: dict[str, object] = {}
+    for e in pri:
+        k = norm_text(e.text)
+        if k not in out:
+            e.src = [(e.file, e.line)]
+            out[k] = e
+        else:
+            out[k].src.append((e.file, e.line))
+    return list(out.values())
 
 
 def iter_vault_files(root: Path, cfg: dict) -> list[Path]:

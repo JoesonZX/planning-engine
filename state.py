@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from parser import load_config
+from parser import dedup_entries, load_config
 from vault import Snapshot
 import briefs
 from distill import rule_na
@@ -33,13 +33,18 @@ def _item(e, today: dt.date, brief: str | None = None) -> dict:
         item["na"] = na  # 稀疏字段：仅长行蒸馏时出现
     if brief:
         item["brief"] = f"{briefs.BRIEFS_DIR}/{brief}"
+    if len(getattr(e, "src", [])) > 1:
+        item["src"] = [list(x) for x in e.src]
     return item
 
 
 def render_state(snap: Snapshot) -> dict:
     today, cfg = snap.today, snap.cfg
     horizon_end = today + dt.timedelta(days=int(cfg["horizon_days"]))
-    entries = snap.entries
+    # 任务（checkbox，可勾可统计）与日程（表格/普通日期行，只按日展示）彻底分离（v7）
+    all_entries = dedup_entries(snap.entries)
+    entries = [e for e in all_entries if e.done is not None]          # 任务
+    schedule = [e for e in all_entries if e.done is None and e.dates]  # 日程
     file_ages = snap.file_ages
     index = briefs.load_index(snap.root)
 
@@ -49,6 +54,12 @@ def render_state(snap: Snapshot) -> dict:
 
     today_items, week, stale_src = [], {}, []
     seen_week: set[str] = set()
+    sched_today = [e for e in schedule if today in e.dates]
+    sched_week: dict[str, list] = {}
+    for e in schedule:
+        future = sorted(d for d in e.dates if today < d <= horizon_end)
+        if future:
+            sched_week.setdefault(future[0].isoformat(), []).append(_item(e, today))
     for e in entries:
         b = _brief_of(e)
         if today in e.dates:
@@ -68,12 +79,20 @@ def render_state(snap: Snapshot) -> dict:
     stale = sorted(stale_src,
                    key=lambda e: -((today - max(e.dates)).days if e.dates
                                    else file_ages.get(e.file, 0)))
+    week_out = []
+    for d in sorted(set(week) | set(sched_week)):
+        week_out.append({
+            "date": d,
+            "items": week.get(d, []),
+            "sched": sched_week.get(d, []),
+        })
     return {
         "generated_at": snap.now.isoformat(timespec="seconds"),
         "today": today.isoformat(),
         "timeline": snap.timeline,
         "today_items": sorted(today_items, key=lambda x: (not x["s"],)),
-        "week": [{"date": d, "items": week[d]} for d in sorted(week)],
+        "sched_today": sorted(sched_today, key=lambda e: e.dates),
+        "week": week_out,
         "stale": [_item(e, today) for e in stale[:12]],
     }
 

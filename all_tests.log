@@ -1,0 +1,13 @@
+........[briefs] guard: no citation (head='# 📋 任务简报 · 测试\n没有任何链接。'), dropping
+.....[briefs] guard: no citation (head='# 📋 任务简报 · 测试\n没有任何链接。'), dropping
+[briefs] guard: no citation (head='# 📋 任务简报 · 测试\n没有任何链接。'), dropping
+[briefs] guard: no citation (head='# 📋 任务简报 · 测试\n没有任何链接。'), dropping
+.[briefs] budget reached, no new briefs tonight
+.[briefs] guard: exceeds 60 lines, dropping
+..................................................[profile] guard: no ## sections, keeping last version
+..[profile] guard: private keyword hit, keeping last version
+..............
+----------------------------------------------------------------------
+Ran 81 tests in 3.025s
+
+OK
