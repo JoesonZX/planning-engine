@@ -47,11 +47,18 @@ def _item(e, today: dt.date, brief: str | None = None) -> dict:
 def render_state(snap: Snapshot) -> dict:
     today, cfg = snap.today, snap.cfg
     horizon_end = today + dt.timedelta(days=int(cfg["horizon_days"]))
-    # 任务（checkbox，可勾可统计）与日程（表格/普通日期行，只按日展示）彻底分离（v7）
+    # 任务（checkbox，可勾可统计）与日程（表格/普通日期行，只按日展示）彻底分离（v7）；
+    # v9 三分：其余带日期行进 misc（「其他带日期」折叠区，可删可改期——不再隐形）
     all_entries = dedup_entries(snap.entries)
     entries = [e for e in all_entries if e.done is not None]          # 任务
-    schedule = [e for e in all_entries if e.done is None and e.dates
-                and (SCHED_LEAD.search(e.raw.lstrip()) or "｜" in e.raw)]  # 日程
+
+    def _sched_qualifies(e) -> bool:
+        return bool(SCHED_LEAD.search(e.raw.lstrip()) or "｜" in e.raw)
+
+    schedule = [e for e in all_entries
+                if e.done is None and e.dates and _sched_qualifies(e)]   # 日程
+    misc = [e for e in all_entries
+            if e.done is None and e.dates and not _sched_qualifies(e)]   # 其他带日期
     file_ages = snap.file_ages
     index = briefs.load_index(snap.root)
 
@@ -63,6 +70,15 @@ def render_state(snap: Snapshot) -> dict:
     seen_week: set[str] = set()
     sched_today: list = []
     sched_week: dict[str, list] = {}
+    misc_today: list = []
+    misc_week: dict[str, list] = {}
+    # misc：带日期的非任务非日程行——按首个未来日期归因，不做逐日展开（备注不是日程）
+    for e in misc:
+        if today in e.dates:
+            misc_today.append(_item(e, today))
+        future = sorted(d for d in e.dates if today < d <= horizon_end)
+        if future:
+            misc_week.setdefault(future[0].isoformat(), []).append(_item(e, today))
     for e in schedule:
         # v8：日程 blob 行（「SD 9.11–9.14 ｜ Joshua Tree 9.15 ｜ …」）逐日展开；
         # 今天视图与周视图走同一展开（复查修正：原 sched_today 用旧 parser 日期，
@@ -105,11 +121,12 @@ def render_state(snap: Snapshot) -> dict:
                    key=lambda e: -((today - max(e.dates)).days if e.dates
                                    else file_ages.get(e.file, 0)))
     week_out = []
-    for d in sorted(set(week) | set(sched_week)):
+    for d in sorted(set(week) | set(sched_week) | set(misc_week)):
         week_out.append({
             "date": d,
             "items": week.get(d, []),
             "sched": sched_week.get(d, []),
+            "misc": misc_week.get(d, []),
         })
     return {
         "generated_at": snap.now.isoformat(timespec="seconds"),
@@ -117,6 +134,7 @@ def render_state(snap: Snapshot) -> dict:
         "timeline": snap.timeline,
         "today_items": sorted(today_items, key=lambda x: (not x["s"],)),
         "sched_today": sched_today,
+        "misc_today": misc_today,
         "week": week_out,
         "stale": [_item(e, today) for e in stale[:12]],
     }
