@@ -335,9 +335,14 @@ def norm_text(t: str) -> str:
 def dedup_entries(entries: list) -> list:
     """语义去重：clean 文本相同的条目合并为一条，重复来源记入 .src（file,line 对）。
 
-    主来源优先取含「执行清单」的文件（任务的主家），其余按 file/line 稳定排序。
+    主来源优先取含「执行清单」/「月计划」的文件（任务的主家，v12 更名兼容），
+    其余按 file/line 稳定排序。
     """
-    pri = sorted(entries, key=lambda e: (0 if "执行清单" in e.file else 1, e.file, e.line))
+    def _pri(e) -> tuple:
+        name_pri = 0 if ("执行清单" in e.file or "月计划" in e.file) else 1
+        return (name_pri, e.file, e.line)
+
+    pri = sorted(entries, key=_pri)
     out: dict[str, object] = {}
     for e in pri:
         k = norm_text(e.text)

@@ -46,7 +46,12 @@ CLASSIFY_SYSTEM = (
 def classify_batch(items: list[str], targets: list[str], cfg: dict,
                    api_key: str | None, usage_path: Path,
                    now: dt.datetime) -> dict[int, str] | None:
-    """返回 {序号: 目标路径}；失败/超预算返回 None（调用方全部 hold）。"""
+    """返回 {序号: 目标路径}；失败/超预算返回 None（调用方全部 hold）。
+
+    v12 路由：目标文件之外允许两个特殊值——
+    "TODO"     ：无死线的一次性杂务（提示用户记进自己的 todo 应用，不写规划）；
+    "DECISION" ：像方向/优先级变更（提示写成决策卡，走人工确认）。
+    """
     if not api_key or not items:
         return None
     budget = float(cfg.get("monthly_budget_usd", 3.0))
@@ -62,6 +67,9 @@ def classify_batch(items: list[str], targets: list[str], cfg: dict,
         "把每条分到最合适的目标文件，输出 JSON 数组，"
         '形如 [{"n":1,"target":"路径"},{"n":2,"target":"HOLD"}]。'
         "不合适归档的一律 HOLD。"
+        "路由规则（v12）：像有死线/有后果的承诺或某主题的持续事项 → 目标文件；"
+        "无死线的一次性杂务（买东西、打电话、修东西）→ {\"target\":\"TODO\"}；"
+        "像方向或优先级变更（「以后不…了」「改为主攻…」）→ {\"target\":\"DECISION\"}。"
     )
     content = call_glm(
         cfg,
@@ -98,13 +106,16 @@ def append_to_target(root: Path, target: str, text: str, today: dt.date) -> bool
     return True
 
 
-def rewrite_inbox(root: Path, cfg: dict, held: list[str]) -> None:
+def rewrite_inbox(root: Path, cfg: dict, held: list[str],
+                  todo_hints: list[str] | None = None) -> None:
     path = root / cfg.get("inbox_file", "inbox.md")
     header = "# inbox（手机随手记落点；每周日自动分拣，⏳ 项等你人工处理）\n"
     body = header
     for h in held:
         body += f"\n⏳ 待人工：{h}"
-    if held:
+    for t in (todo_hints or []):
+        body += f"\n→ 记入你的 todo 应用：{t}（规划系统不收杂务）"
+    if held or todo_hints:
         body += "\n"
     path.write_text(body, encoding="utf-8")
 
@@ -129,6 +140,7 @@ def triage(root: Path, cfg: dict, api_key: str | None) -> dict:
                     items.append(s)
 
     held: list[str] = []
+    todo_hints: list[str] = []
     assigned: dict[int, str] = {}
     private_n = 0
 
@@ -152,6 +164,10 @@ def triage(root: Path, cfg: dict, api_key: str | None) -> dict:
                 target = result.get(i, "HOLD")
                 if target in targets and i <= len(items):
                     assigned[i] = target
+                elif target == "TODO":
+                    todo_hints.append(items[i - 1])
+                elif target == "DECISION":
+                    held.append(f"[决策卡候选] {items[i - 1]}")
                 else:
                     held.append(items[i - 1])
 
@@ -163,11 +179,12 @@ def triage(root: Path, cfg: dict, api_key: str | None) -> dict:
         else:
             held.append(items[i - 1])
 
-    rewrite_inbox(root, cfg, held)
+    rewrite_inbox(root, cfg, held, todo_hints)
     summary = {
         "ts": now.isoformat(timespec="seconds"),
         "total": len(items), "classified": sum(written.values()),
         "held": len(held), "held_private": private_n,
+        "todo_hints": len(todo_hints),
         "written": written,
     }
     out = root / "reports" / "triage-latest.json"

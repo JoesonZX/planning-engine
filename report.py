@@ -121,6 +121,29 @@ def render_report(snap: Snapshot) -> str:
         lines.append("（未来一周没有死线）")
     lines.append("")
 
+    # 二·五、项目状态（v12：从月计划提取各项目组的「状态：」行——承诺层现状一眼可见；
+    # 未配置 month_plan_file 时整节缺席，golden 与旧布局不受影响）
+    plan_rel = str(cfg.get("month_plan_file", "") or "")
+    status_rows: list[str] = []
+    if plan_rel:
+        plan_path = snap.root / plan_rel
+        if plan_path.exists():
+            group = ""
+            for raw_line in plan_path.read_text(encoding="utf-8").splitlines():
+                s = raw_line.strip()
+                hm = re.match(r"^##\s+(.+)$", s)
+                if hm:
+                    group = hm.group(1).strip()
+                    continue
+                sm = re.match(r"^状态[：:]\s*(.+)$", s)
+                if sm and group and group != "归档（已完成与已决）":
+                    status_rows.append(f"- **{group}**：{sm.group(1).strip()}")
+    if status_rows:
+        lines.append("## 各项目状态（月计划）")
+        lines.append("")
+        lines.extend(status_rows)
+        lines.append("")
+
     # 三、滑落项
     stale = collect_stale(snap)
     lines.append(f"## 三、滑落项（≥{snap.stale_days} 天未动）")
