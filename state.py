@@ -61,21 +61,27 @@ def render_state(snap: Snapshot) -> dict:
 
     today_items, week, stale_src = [], {}, []
     seen_week: set[str] = set()
-    sched_today = sorted([e for e in schedule if today in e.dates],
-                         key=lambda e: e.dates)
+    sched_today: list = []
     sched_week: dict[str, list] = {}
     for e in schedule:
         # v8：日程 blob 行（「SD 9.11–9.14 ｜ Joshua Tree 9.15 ｜ …」）逐日展开；
-        # 表格行与普通行退回「首个未来日期」原行为
+        # 今天视图与周视图走同一展开（复查修正：原 sched_today 用旧 parser 日期，
+        # 框架行出现在周视图 9/12 组、今天视图却缺席）；表格行走首格归因
         expanded = expand_schedule(e.raw, today) if not e.raw.lstrip().startswith("|") else []
         if len(expanded) >= 1:
             for d, seg in expanded:
-                if today <= d <= horizon_end:
-                    it = _item(e, today)
-                    it["t"] = seg
-                    it["seg"] = True
+                if not (today <= d <= horizon_end):
+                    continue
+                it = _item(e, today)
+                it["t"] = seg
+                it["seg"] = True
+                if d == today:
+                    sched_today.append(it)
+                else:
                     sched_week.setdefault(d.isoformat(), []).append(it)
             continue
+        if today in e.dates:
+            sched_today.append(_item(e, today))
         future = sorted(d for d in e.dates if today < d <= horizon_end)
         if future:
             sched_week.setdefault(future[0].isoformat(), []).append(_item(e, today))
@@ -110,7 +116,7 @@ def render_state(snap: Snapshot) -> dict:
         "today": today.isoformat(),
         "timeline": snap.timeline,
         "today_items": sorted(today_items, key=lambda x: (not x["s"],)),
-        "sched_today": [_item(e, today) for e in sched_today],
+        "sched_today": sched_today,
         "week": week_out,
         "stale": [_item(e, today) for e in stale[:12]],
     }
