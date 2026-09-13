@@ -182,17 +182,39 @@ def build_weekly(root: Path, cfg: dict, now: dt.datetime) -> tuple[str, str]:
     return render_weekly(Snapshot.load(root, cfg, now))
 
 
+def load_decision_cards(root: Path) -> str:
+    """决策/ 目录全量卡片（v11：决策史是反思与三件事的依据）。"""
+    d = root / "决策"
+    if not d.is_dir():
+        return ""
+    parts = []
+    for f in sorted(d.glob("*.md")):
+        if f.name.startswith("_"):
+            continue
+        try:
+            parts.append(f"=== 决策/{f.name} ===\n" + f.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return "\n\n".join(parts)
+
+
 def glm_three_things(weekly_body: str, cfg: dict, api_key: str | None,
-                     usage_path: Path, now: dt.datetime) -> str | None:
+                     usage_path: Path, now: dt.datetime,
+                     decisions: str = "") -> str | None:
     if not api_key:
         return None
     budget = float(cfg.get("monthly_budget_usd", 3.0))
     if month_spend(usage_path, now) >= budget:
         return None
     prompt = (
-        "下面是本周复盘数据。基于它起草「下周三件事」：三条具体的、"
-        "可直接执行的任务式建议（每条一句话，物流语气，不评判、不谈状态）。"
-        "只从报告里已有的事项中挑优先级最高的，格式：\n1. …\n2. …\n3. …\n\n"
+        "下面是本周复盘数据" + ("与用户的全部决策卡" if decisions else "") + "。\n\n"
+        + (f"=== 决策卡 ===\n{decisions}\n\n" if decisions else "")
+        + "先做本周反思（三问，各一两句，指向具体事实）："
+        "①现在最重要的事是什么；②哪些日常系统在支撑它；③什么在拖累。\n"
+        "然后基于反思起草「下周三件事」：三条具体的、可直接执行的建议"
+        "（每条一句话，物流语气，不评判、不谈状态），"
+        "只从报告已有的事项中挑优先级最高的，且与决策卡方向一致。格式：\n"
+        "## 本周反思\n①…\n②…\n③…\n\n## 下周三件事\n1. …\n2. …\n3. …\n\n"
         + weekly_body
     )
     return call_glm(
@@ -200,7 +222,7 @@ def glm_three_things(weekly_body: str, cfg: dict, api_key: str | None,
         [{"role": "system", "content": SYSTEM_PROMPT},
          {"role": "user", "content": prompt}],
         api_key=api_key, usage_path=usage_path, now=now,
-        max_tokens=300, temperature=0.3, label="three-things")
+        max_tokens=600, temperature=0.3, label="weekly-reflect")
 
 
 def main() -> int:
@@ -223,7 +245,8 @@ def main() -> int:
     body, _title = render_weekly(Snapshot.load(root, cfg, now))
 
     draft = glm_three_things(body, cfg, os.environ.get("GLM_API_KEY"),
-                             root / "reports" / "usage.json", now)
+                             root / "reports" / "usage.json", now,
+                             decisions=load_decision_cards(root))
     lines = body.splitlines()
     insert = next((i for i, l in enumerate(lines) if l.startswith("## 五、")), len(lines))
     block = ["## ⏭️ 下周三件事（草稿，认可后自己抄进清单）", ""]
