@@ -87,3 +87,35 @@ class MiscBoundaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MarkerStripTests(unittest.TestCase):
+    """v10 复查：行首列表标记是书写结构不是内容；纯日期分节线不产生条目。"""
+
+    def _parse(self, body):
+        import tempfile
+        from parser import parse_markdown
+        root = Path(tempfile.mkdtemp(prefix="strip-vault-"))
+        (root / "main.md").write_text(body, encoding="utf-8")
+        return parse_markdown((root / "main.md").read_text(encoding="utf-8"),
+                              today=dt.date(2026, 9, 13))
+
+    def test_numbered_marker_stripped(self):
+        es = self._parse("1. **9/10 上午抽血**（不空腹）→ 细节\n")
+        self.assertEqual(len(es), 1)
+        self.assertFalse(es[0].text.startswith("1. "))
+        self.assertTrue(es[0].text.startswith("**9/10"))
+
+    def test_bullet_marker_stripped(self):
+        es = self._parse("- ⚠️ 杂事：**预约网络** 9/17\n")
+        self.assertEqual(len(es), 1)
+        self.assertFalse(es[0].text.startswith("- "))
+
+    def test_date_only_line_skipped(self):
+        es = self._parse("**9.5–9.7**\n")
+        self.assertEqual(es, [])
+
+    def test_substantive_line_kept(self):
+        es = self._parse("4. **9/27 前：MSN 审稿**（sub-reviewer）——内部死线 9/26\n")
+        self.assertEqual(len(es), 1)
+        self.assertIn("MSN", es[0].text)

@@ -164,6 +164,11 @@ def parse_markdown(text: str, file: str = "", today: date | None = None) -> list
                 rest = cells[1:] if extract_dates(cells[0], today) else cells
                 content = " · ".join(c for c in rest if c)
         content = re.sub(r"^>\s*", "", content)
+        # v10 复查：剥行首列表标记（「1. 」「- 」是书写结构不是内容，卡片里是噪音）
+        content = re.sub(r"^(\d{1,2}[.)]\s+|[-*+]\s+)", "", content)
+        # 纯日期行（周分节线「**9.1–9.4**」等）没有实质内容，不产生条目
+        if not _has_substance(content):
+            continue
 
         if done is None and not dates and not has_star:
             continue
@@ -312,6 +317,13 @@ def generated_files(cfg: dict) -> set[str]:
     return {cfg.get("inbox_file", "inbox.md"),
             cfg.get("dashboard_file", "仪表盘.md"),
             cfg.get("profile_file", "profile.md")}
+
+
+def _has_substance(text: str) -> bool:
+    """剥掉日期 token 与标点/记号后是否还有实质内容（纯日期分节线 → False）。"""
+    core = re.sub(r"\d{1,2}[./]\d{1,2}", "", text)
+    core = re.sub(r"[\s*·•、，,；;：:．\-–——–|｜（）()【】\[\]#>]+", "", core)
+    return bool(core)
 
 
 def norm_text(t: str) -> str:
