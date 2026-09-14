@@ -140,31 +140,52 @@ def render_weekly(snap: Snapshot) -> tuple[str, str]:
     lines.append(f"⏳ 待人工 **{held_n}** 条" + (f" ｜ {triage_info}" if triage_info else ""))
     lines.append("")
 
-    # 五点五、本周日记（行为摘要）——只提取「做了什么」节；感受区代码级排除
+    # 五点五、本周节律（状态传感器，v13）——日记天数/睡眠只从「做了什么」节统计，
+    # 感受区代码级排除（写了感受-only 的日记也算写了，不施压产出行为内容）。
+    # 日记 ≥3 天未写=⚠️ 断线警报；无日记不再静默缺席（W37 盲区教训）。
+    # 社交机器不可观测，只列自查行。
+    sleep_re = re.compile(r"睡(?:眠|了)?\s*(\d+(?:\.\d+)?)\s*(?:h|H|小时)")
+    written: list[dt.date] = []
+    missing: list[dt.date] = []
+    sleep_vals: list[float] = []
     diary_lines: list[str] = []
     diary_dir = snap.root / "日记"
-    if diary_dir.exists():
-        for i in range(7):
-            d = week_start + dt.timedelta(days=i)
-            p = diary_dir / f"{d.isoformat()}.md"
-            if not p.exists():
-                continue
-            try:
-                txt = p.read_text(encoding="utf-8")
-            except OSError:
-                continue
-            m = re.search(r"\*\*做了什么\*\*\n([\s\S]*?)(?:\n\*\*|$)", txt)
-            if not m:
-                continue
-            items = [ln.strip().lstrip("- ").strip()
-                     for ln in m.group(1).splitlines() if ln.strip().startswith("-")]
-            if items:
-                diary_lines.append(f"**{d.month}/{d.day}** " + "；".join(items))
+    for i in range(7):
+        d = week_start + dt.timedelta(days=i)
+        p = diary_dir / f"{d.isoformat()}.md"
+        if not p.exists():
+            missing.append(d)
+            continue
+        written.append(d)
+        try:
+            txt = p.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        m = re.search(r"\*\*做了什么\*\*\n([\s\S]*?)(?:\n\*\*|$)", txt)
+        if not m:
+            continue
+        items = [ln.strip().lstrip("- ").strip()
+                 for ln in m.group(1).splitlines() if ln.strip().startswith("-")]
+        for it in items:
+            sm = sleep_re.search(it)
+            if sm:
+                sleep_vals.append(float(sm.group(1)))
+        if items:
+            diary_lines.append(f"**{d.month}/{d.day}** " + "；".join(items))
+    lines.append("## 五点五、本周节律（状态传感器）")
+    lines.append("")
+    miss_txt = f"（缺 {'、'.join(f'{d:%m/%d}' for d in missing)}）" if missing else ""
+    alarm = " ｜ ⚠️ 断线警报：≥3 天未写——传感器盲区" if len(missing) >= 3 else ""
+    lines.append(f"- 日记 **{len(written)}/7** 天{miss_txt}{alarm}")
+    if sleep_vals:
+        lines.append(f"- 睡眠均值 **{sum(sleep_vals) / len(sleep_vals):.1f}h**（{len(sleep_vals)} 天有数据）")
+    else:
+        lines.append("- 睡眠均值 无数据——「做了什么」末行写「睡眠 Xh」即可被统计")
+    lines.append("- 社交 ≥1 次：请自查（机器不可观测）")
     if diary_lines:
-        lines.append("## 五点五、本周日记（做了什么）")
         lines.append("")
         lines.extend(f"- {x}" for x in diary_lines)
-        lines.append("")
+    lines.append("")
 
     # 六、用量
     usage_path = snap.root / "reports" / "usage.json"
