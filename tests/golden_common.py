@@ -22,7 +22,7 @@ from golden_vault import build_fixture  # noqa: E402
 
 def collect_outputs(root: Path) -> dict[str, str]:
     from ics import generate_ics
-    from report import build_dashboard, build_report
+    from report import build_report
     from state import build_state, build_stats
     from weekly_review import build_weekly
 
@@ -31,7 +31,6 @@ def collect_outputs(root: Path) -> dict[str, str]:
     now_utc = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
     return {
         "report.md": build_report(root, cfg, now),
-        "dashboard.md": build_dashboard(root, cfg, now),
         "state.json": json.dumps(build_state(root, cfg, now),
                                  ensure_ascii=False, indent=1),
         "stats.json": json.dumps(build_stats(root, cfg, now), ensure_ascii=False),
@@ -47,8 +46,8 @@ def load_config(root: Path):
 
 def normalize(text: str) -> str:
     text = re.sub(r"生成于 \d{4}-\d{2}-\d{2} \d{2}:\d{2}", "生成于 <TS>", text)
-    text = re.sub(r"仪表盘 · .*", "仪表盘 · <NOW>", text)  # 头部带当时时分
     text = re.sub(r'"generated_at": "[^"]+"', '"generated_at": "<TS>"', text)
     text = re.sub(r"DTSTAMP:\d{8}T\d{6}Z", "DTSTAMP:<TS>", text)
     text = re.sub(r"\d+ 天未动", "N 天未动", text)
+    text = re.sub(r"已挂 \d+\.?\d* 天", "已挂 N 天", text)  # 文件年龄随日内时刻漂移
     return text

@@ -122,7 +122,7 @@ class Snapshot:
 
     @cached_property
     def entries(self) -> list:
-        """全库解析结果（已剔除 inbox/仪表盘/画像等生成物）。"""
+        """全库解析结果（已剔除 inbox/画像等生成物）。"""
         entries = load_vault(self.root, self.cfg, today=self.today)
         excluded = generated_files(self.cfg)
         return [e for e in entries if e.file not in excluded]

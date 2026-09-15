@@ -130,11 +130,11 @@ def render_state(snap: Snapshot) -> dict:
             "misc": misc_week.get(d, []),
         })
 
-    # ---- v10 月窗：自然月全量（过去天只含未完成任务），跨多日任务/备注抽离 spans ----
+    # ---- v10 月窗：自然月全量（过去天只含未完成任务）。v13：spans 停止生成
+    #（月视图 v12 已退役，前端无消费方）；跨多日条目保持「抽离不复制」语义，只是不再输出 ----
     m_start = today.replace(day=1)
     m_end = m_start.replace(day=calendar.monthrange(m_start.year, m_start.month)[1])
     m_days: dict[str, dict] = {}
-    m_spans: list = []
 
     def _day(d: dt.date) -> dict:
         return m_days.setdefault(d.isoformat(), {"items": [], "sched": [], "misc": []})
@@ -142,7 +142,7 @@ def render_state(snap: Snapshot) -> dict:
     def _month_dates(e) -> list:
         return sorted(d for d in e.dates if m_start <= d <= m_end)
 
-    for e in schedule:  # 日程（含展开段）不进 spans：按天呈现
+    for e in schedule:  # 日程（含展开段）按天呈现
         expanded = expand_schedule(e.raw, today) if not e.raw.lstrip().startswith("|") else []
         if expanded:
             for d, seg in expanded:
@@ -157,18 +157,12 @@ def render_state(snap: Snapshot) -> dict:
                 _day(dm[0])["sched"].append(_item(e, today))
     for e in misc:
         dm = _month_dates(e)
-        if len(dm) >= 2:
-            it = _item(e, today)
-            it["k"] = "misc"
-            m_spans.append(it)
-        elif dm:
-            _day(dm[0])["misc"].append(_item(e, today))
+        if len(dm) < 2:  # 跨多日条目原归 spans，现直接不进月窗
+            for d in dm:
+                _day(d)["misc"].append(_item(e, today))
     for e in entries:  # checkbox 任务：多日期行是「跨期间的约定」，抽离不复制
         dm = _month_dates(e)
         if len(dm) >= 2:
-            it = _item(e, today)
-            it["k"] = "task"
-            m_spans.append(it)
             continue
         for d in dm:
             if d < today and e.done is not False:
@@ -180,7 +174,6 @@ def render_state(snap: Snapshot) -> dict:
         "start": m_start.isoformat(),
         "end": m_end.isoformat(),
         "days": {k: m_days[k] for k in sorted(m_days)},
-        "spans": sorted(m_spans, key=lambda x: (x["dates"] or ["9999"])[0]),
     }
     return {
         "generated_at": snap.now.isoformat(timespec="seconds"),

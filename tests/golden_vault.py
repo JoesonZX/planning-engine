@@ -63,6 +63,20 @@ def build_fixture() -> tuple[Path, dt.datetime]:
     (tmp / "规划" / "term.md").write_text(f"""# 学期
 - [ ] 开学 {d(1)}
 - [ ] 期末 {d(12)}
+
+## 待定问题
+1. 主目标教授人选（三路接触后 10 月定）
+""", encoding="utf-8")
+
+    # 决策卡 fixture（v13）：复盘日期 = 今天+3 → 进周报「待定问题与到期卡」+ ICS 事件。
+    # 决策/ 在 skip_dirs（不产生代办卡），但 ics/weekly 直读目录。
+    card_day = today + dt.timedelta(days=3)
+    (tmp / "决策").mkdir()
+    (tmp / "决策" / "2026-09-10 示例决策卡.md").write_text(
+        f"""# 决策卡 · 2026-09-10 · 示例决策卡
+
+- **拍板**：B
+- **复盘日期**：{card_day.isoformat()}（随月度复盘）
 """, encoding="utf-8")
 
     stale_body = f"""# 陈旧文件
@@ -73,8 +87,6 @@ def build_fixture() -> tuple[Path, dt.datetime]:
     (tmp / "stale.md").write_text(stale_body, encoding="utf-8")
 
     (tmp / "skipme.md").write_text(f"- [ ] skip_files 内不应出现 {d(1)}\n",
-                                    encoding="utf-8")
-    (tmp / "仪表盘.md").write_text(f"# 仪表盘\n\n- [ ] 生成物里的假任务 {d(1)}\n",
                                     encoding="utf-8")
     (tmp / "profile.md").write_text(f"""# profile · 用户画像
 
@@ -93,6 +105,7 @@ horizon_days: 7
 stale_days: 14
 skip_files:
   - skipme.md
+skip_dirs: [.git, reports, .github, engine, 日记, 决策]
 triage_targets:
   - 规划/term.md
 timeline:
@@ -122,9 +135,9 @@ timeline:
                                  + f"- [ ] 三天前新增的任务 {d(4)}\n", encoding="utf-8")
     _git(tmp, "add", "-A", when=now - dt.timedelta(days=3))
     _git(tmp, "commit", "-q", "-m", "add tasks", when=now - dt.timedelta(days=3))
-    (tmp / "仪表盘.md").write_text(
-        (tmp / "仪表盘.md").read_text(encoding="utf-8") + "- [x] bot 勾选行\n",
-        encoding="utf-8")
+    # bot 提交主体：v13 前是仪表盘.md（已退役），现用 scratch.md——
+    # 验证 bot commit 不进人本统计/quiet 门（v13 起该文件已被解析器正常解析）
+    (tmp / "scratch.md").write_text("- [x] bot 勾选行\n", encoding="utf-8")
     _git(tmp, "add", "-A", when=now - dt.timedelta(hours=30), who=BOT)
     _git(tmp, "commit", "-q", "-m", "bot commit", when=now - dt.timedelta(hours=30),
          who=BOT)

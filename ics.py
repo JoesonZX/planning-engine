@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import re
 from pathlib import Path
 
 from parser import load_config
@@ -17,6 +18,32 @@ from vault import Snapshot
 
 PAST_DAYS = 7
 FUTURE_DAYS = 120
+
+
+def load_card_reviews(root: Path) -> list[tuple[dt.date, str]]:
+    """决策卡复盘日期 → 全天事件（v13：复盘日期进日历，不再靠人脑记）。
+    只认完整 YYYY-MM-DD；月级模糊日期（「2026-12 中」）不进日历。"""
+    d = root / "决策"
+    out: list[tuple[dt.date, str]] = []
+    if not d.is_dir():
+        return out
+    for f in sorted(d.glob("*.md")):
+        if f.name.startswith("_"):
+            continue
+        try:
+            txt = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        m = re.search(r"\*\*复盘日期\*\*[：:](.+)", txt)
+        if not m:
+            continue
+        title = re.sub(r"^\d{4}-\d{2}-\d{2}\s*", "", f.stem)
+        for y, mo, dy in re.findall(r"(\d{4})-(\d{1,2})-(\d{1,2})", m.group(1)):
+            try:
+                out.append((dt.date(int(y), int(mo), int(dy)), f"决策复盘 · {title}"))
+            except ValueError:
+                continue
+    return out
 
 
 def escape_ics(text: str) -> str:
@@ -112,6 +139,9 @@ def render_ics(snap: Snapshot, now_utc: dt.datetime) -> bytes:
                 continue
             seen.add(key)
             out.extend(build_vevent(d, e.text, e.star, e.file, e.line, now_utc))
+    for d, text in load_card_reviews(snap.root):  # v13：决策卡复盘日 → 全天事件
+        if lo <= d <= hi:
+            out.extend(build_vevent(d, text, False, "决策/复盘日", 0, now_utc))
     out.append("END:VCALENDAR")
 
     # CRLF + 折行

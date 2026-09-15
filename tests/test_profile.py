@@ -22,7 +22,6 @@ NOW = datetime(2026, 9, 13, 20, 0, 0)
 CFG = {
     "timezone": "America/Los_Angeles",
     "inbox_file": "inbox.md",
-    "dashboard_file": "仪表盘.md",
     "model": "glm-4-flash",
     "monthly_budget_usd": 3.0,
 }
@@ -34,8 +33,8 @@ OLD_PROFILE = """# profile · 用户画像（每周日随复盘更新）
 - 建议给出具体时刻
 <!-- user-end -->
 
-## 当前重心（本季度）
-- 科研 ≥15h/周（W35·执行清单）
+## 节律与习惯
+- 睡前读书 20min（config·时间线）
 
 ## 修订记录
 - 2026-09-06 W36: 初版
@@ -47,7 +46,7 @@ class TestSplitRegions(unittest.TestCase):
         hand, agent = split_regions(OLD_PROFILE)
         self.assertIn("手写区", hand)
         self.assertNotIn("user-start", agent)
-        self.assertIn("当前重心", agent)
+        self.assertIn("节律与习惯", agent)
 
     def test_without_markers(self):
         hand, agent = split_regions("# 裸文件\n- 条目\n")
@@ -68,7 +67,7 @@ class TestUpdateProfile(unittest.TestCase):
         return mock.patch("profile._glm_revise", return_value=text)
 
     def test_happy_path_updates_and_keeps_handwritten(self):
-        revised = "## 当前重心（本季度）\n- 科研 ≥15h/周（W37·滑落区）\n\n## 修订记录\n- 2026-09-13 W37: 更新\n"
+        revised = "## 规划校准（估时 vs 实际）\n- 估时偏差待归纳（W37·节律区）\n\n## 修订记录\n- 2026-09-13 W37: 更新\n"
         with self._revised(revised):
             self.assertTrue(update_profile(self.root, CFG, "key",
                                            self.root / "u.json", NOW, "周报"))
@@ -81,7 +80,7 @@ class TestUpdateProfile(unittest.TestCase):
         # GLM 试图自带标记对重建手写区 → 标记行被剥离，原手写区逐字保留，
         # 全文有且只有一对标记
         revised = ("<!-- user-start -->\n- 恶意覆盖的手写区\n<!-- user-end -->\n\n"
-                   "## 当前重心\n- 正常修订（W37）\n")
+                   "## 规划校准\n- 正常修订（W37）\n")
         with self._revised(revised):
             update_profile(self.root, CFG, "key", self.root / "u.json", NOW, "周报")
         body = (self.root / "profile.md").read_text(encoding="utf-8")
@@ -121,7 +120,7 @@ class TestUpdateProfile(unittest.TestCase):
 
     def test_first_creation_from_template(self):
         (self.root / "profile.md").unlink()
-        revised = "## 当前重心（本季度）\n- 新条目（W37）\n"
+        revised = "## 常见滑落模式\n- 新条目（W37·滑落区）\n"
         with self._revised(revised):
             self.assertTrue(update_profile(self.root, CFG, "key",
                                            self.root / "u.json", NOW, "周报"))
@@ -162,7 +161,7 @@ class TestRevisionGuard(unittest.TestCase):
 
     def test_valid_revision_passes(self):
         ok, _ = _revision_guard_ok(
-            "## 当前重心\n- 科研 ≥15h/周（W37·滑落区）\n\n## 修订记录\n- 2026-09-13 W37: 更新\n")
+            "## 节律与习惯\n- 睡前读书 20min（W37·节律区）\n\n## 修订记录\n- 2026-09-13 W37: 更新\n")
         self.assertTrue(ok)
 
     def test_star_task_line_rejected(self):
@@ -189,25 +188,29 @@ class TestRevisionGuard(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("bullet", why)
 
-    def test_allowed_sections_cover_six(self):
-        self.assertEqual(len(ALLOWED_SECTIONS), 6)
+    def test_allowed_sections_cover_five(self):
+        self.assertEqual(len(ALLOWED_SECTIONS), 5)
 
 
 class TestSanitizeWeeklyBody(unittest.TestCase):
     def test_keeps_only_stat_sections(self):
         body = ("# 周复盘\n> 生成于 x\n"
-                "## 一、本周完成\n- 3 件\n"
+                "## 一、滑落升级（≥14 天未动，全量）\n- 某事 N 天未动\n"
                 "## ⏭️ 下周三件事\n1. 预约医疗\n"
-                "## 四、本周硬节点（⭐）\n- ⬜ ⭐⭐医疗预约\n"
-                "## 五、inbox 残留\n⏳ 待人工 1 条\n"
+                "## 二、本周硬节点（⭐）\n- ⬜ ⭐⭐医疗预约\n"
+                "## 三、inbox 残留\n⏳ 待人工 1 条\n"
+                "## 四、本周节律（状态传感器）\n- 日记 5/7 天\n"
+                "## 五、待定问题与到期卡\n- 2026-09-30 《某卡》\n"
                 "## 六、GLM 用量\n$0.00\n")
         out = sanitize_weekly_body(body)
-        self.assertIn("## 一、本周完成", out)
+        self.assertIn("## 一、滑落升级", out)
+        self.assertIn("## 四、本周节律", out)
         self.assertIn("## 六、GLM 用量", out)
         self.assertNotIn("硬节点", out)
         self.assertNotIn("医疗", out)
         self.assertNotIn("三件事", out)
         self.assertNotIn("inbox", out)
+        self.assertNotIn("到期卡", out)
 
 
 class TestTemplate(unittest.TestCase):

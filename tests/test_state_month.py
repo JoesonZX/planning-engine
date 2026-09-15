@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""v10 月窗：state.month = 自然月全量（过去天只含未完成）+ 跨多日任务/备注抽离 spans。
+"""v10 月窗：state.month = 自然月全量（过去天只含未完成）。
 
-日程（表格/展开段）不进 spans——按天呈现；无日期任务不进月视图；week/today 零改动。
+v13：spans 停止生成（月视图 v12 已退役，前端无消费方）；跨多日任务/备注保持
+「抽离不复制」语义（不进单日组），只是不再输出。日程按天呈现；无日期任务不进月窗。
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ class MonthMetaTests(unittest.TestCase):
         self.assertEqual(m["start"], "2026-09-01")
         self.assertEqual(m["end"], "2026-09-30")
         self.assertEqual(m["days"], {})
-        self.assertEqual(m["spans"], [])
+        self.assertNotIn("spans", m)  # v13：spans 退役
 
     def test_week_untouched(self):
         st = _state("- [ ] 未来任务 9/15\n")
@@ -61,41 +62,33 @@ class MonthDaysTests(unittest.TestCase):
         self.assertEqual(st["month"]["days"], {})
 
 
-class SpanTests(unittest.TestCase):
-    def test_multi_date_task_to_spans(self):
+class MultiDateTests(unittest.TestCase):
+    def test_multi_date_task_extracted_not_copied(self):
         # 「B 9/17」这类 ASCII 字母邻接会被版本号防御拒——真实数据用括注/范围形态
         st = _state("- [ ] 酒店：A 店（9/14）、B 店（9/17）\n")
-        self.assertEqual(len(st["month"]["spans"]), 1)
-        self.assertEqual(st["month"]["spans"][0]["k"], "task")
-        self.assertEqual(st["month"]["spans"][0]["dates"], ["2026-09-14", "2026-09-17"])
-        self.assertNotIn("2026-09-14", st["month"]["days"])  # 不再入单日组
+        self.assertNotIn("spans", st["month"])  # 不再输出 spans
+        self.assertNotIn("2026-09-14", st["month"]["days"])  # 仍不入单日组（抽离不复制）
+        self.assertNotIn("2026-09-17", st["month"]["days"])
 
-    def test_multi_date_misc_to_spans(self):
+    def test_multi_date_misc_extracted_not_copied(self):
         st = _state("**9/18 Orientation**（带问题）；**9/23 缴费截止**\n")
-        self.assertEqual(len(st["month"]["spans"]), 1)
-        self.assertEqual(st["month"]["spans"][0]["k"], "misc")
+        self.assertNotIn("2026-09-18", st["month"]["days"])
+        self.assertNotIn("2026-09-23", st["month"]["days"])
 
-    def test_single_date_task_not_span(self):
+    def test_single_date_task_in_days(self):
         st = _state("- [ ] 单点任务 9/20\n")
-        self.assertEqual(st["month"]["spans"], [])
+        self.assertNotIn("spans", st["month"])
         self.assertEqual(len(st["month"]["days"]["2026-09-20"]["items"]), 1)
 
-    def test_schedule_never_span(self):
+    def test_schedule_always_per_day(self):
         st = _state("> 9.14 SD 行程 ｜ 9.15 JT 行程\n\n| 9.16 三 | 表格行程 |\n")
-        self.assertEqual(st["month"]["spans"], [])
         self.assertEqual(len(st["month"]["days"]["2026-09-14"]["sched"]), 1)
         self.assertEqual(len(st["month"]["days"]["2026-09-15"]["sched"]), 1)
         self.assertEqual(len(st["month"]["days"]["2026-09-16"]["sched"]), 1)
 
-    def test_span_sorted_by_first_date(self):
-        st = _state("- [ ] 后写的 9/20、9/25\n- [ ] 先到的 9/14、9/15\n")
-        spans = st["month"]["spans"]
-        self.assertEqual([s["dates"][0] for s in spans], ["2026-09-14", "2026-09-20"])
-
     def test_multi_date_out_of_month_counts_window_only(self):
-        # 月内只 1 个日期 → 不抽（另一日期在月外）
+        # 月内只 1 个日期 → 正常入单日组（另一日期在月外）
         st = _state("- [ ] 跨月的事 9/28、10/15\n")
-        self.assertEqual(st["month"]["spans"], [])
         self.assertEqual(len(st["month"]["days"]["2026-09-28"]["items"]), 1)
 
 

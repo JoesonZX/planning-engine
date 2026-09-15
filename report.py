@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""晚间报告生成器：Snapshot（一次加载）→ render_report / render_dashboard。
+"""晚间报告生成器：Snapshot（一次加载）→ render_report。
 
 物流模式：只统计任务与日程；skip_files（情绪/感情类）物理进不了 Snapshot。
 零第三方依赖。失败策略：GLM 挂了不影响报告主体（正文是确定性的）。
+v13：仪表盘退役（前端零引用的生成物，信息由简报页/周报承接）。
 """
 
 from __future__ import annotations
@@ -253,74 +254,6 @@ def glm_summary(report_body: str, cfg: dict, api_key: str | None,
     return content, None
 
 
-# ---------------------------------------------------------------- 仪表盘
-
-def render_dashboard(snap: Snapshot) -> str:
-    """全周视角首屏（每晚随报告写入根目录 仪表盘.md）。"""
-    cfg, today, now = snap.cfg, snap.today, snap.now
-    horizon_end = today + dt.timedelta(days=int(cfg["horizon_days"]))
-
-    entries = dedup_entries(snap.entries)
-
-    lines: list[str] = []
-    lines.append(f"# 🧭 仪表盘 · {_fmt_day(today)} {now:%H:%M}")
-    lines.append("")
-    lines.append("> 每晚 21:00 随晚间报告自动更新 ｜ 只含任务与日程（物流模式）")
-    lines.append("")
-
-    today_items = [e for e in entries if any(d == today for d in e.dates)]
-    today_items.sort(key=lambda e: (not e.star, e.file))
-    briefs_map = _brief_lookup(snap, entries)
-    lines.append("## ✅ 今天")
-    lines.append("")
-    if today_items:
-        lines.extend(_li(e, briefs_map.get(id(e), "")) for e in today_items)
-    else:
-        lines.append("（今天没有标注事项）")
-    lines.append("")
-
-    week: list[tuple[dt.date, Entry]] = []
-    for e in entries:
-        future = [d for d in e.dates if today < d <= horizon_end]
-        if future:
-            week.append((min(future), e))
-    week.sort(key=lambda t: (t[0], not t[1].star))
-    lines.append(f"## 📅 未来 {cfg['horizon_days']} 天")
-    lines.append("")
-    if week:
-        last = None
-        for d, e in week:
-            if d != last:
-                lines.append(f"**{_fmt_day(d)}**")
-                last = d
-            lines.append(_li(e, briefs_map.get(id(e), "")))
-    else:
-        lines.append("（未来一周没有死线）")
-    lines.append("")
-
-    stale = collect_stale(snap)
-    lines.append(f"## 🐌 滑落 ≥{snap.stale_days} 天")
-    lines.append("")
-    if stale:
-        lines.extend(stale[:10])
-        if len(stale) > 10:
-            lines.append(f"- ……另有 {len(stale) - 10} 条（周日周报看全量）")
-    else:
-        lines.append("（没有滑落项）")
-    lines.append("")
-
-    lines.append("## 📥 inbox")
-    lines.append("")
-    lines.append(f"待分拣 **{len(snap.inbox_lines)}** 条（每周日 20:00 自动分拣；⏳ 项需你人工处理）")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def build_dashboard(root: Path, cfg: dict, now: dt.datetime) -> str:
-    """兼容入口（golden/外部调用）。"""
-    return render_dashboard(Snapshot.load(root, cfg, now))
-
-
 # ---------------------------------------------------------------- 入口
 
 def main() -> int:
@@ -347,7 +280,7 @@ def main() -> int:
                 print("[skip] today's report already generated (pre-evening)")
                 return 0
 
-    snap = Snapshot.load(root, cfg, now)  # 报告与仪表盘共享一次加载
+    snap = Snapshot.load(root, cfg, now)
     body = render_report(snap)
 
     quiet = vault_quiet(root)
@@ -374,10 +307,6 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(body + "\n", encoding="utf-8")
     print(f"[ok] wrote {out_path}")
-
-    dash = root / cfg.get("dashboard_file", "仪表盘.md")
-    dash.write_text(render_dashboard(snap) + "\n", encoding="utf-8")
-    print(f"[ok] wrote {dash}")
     return 0
 
 

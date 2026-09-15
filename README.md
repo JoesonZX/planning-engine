@@ -19,12 +19,12 @@
 
 ### 产出层（吃 Snapshot 的 render 函数）
 
-- `report.py` — 晚间报告（`tomorrow.md`）六大板块 + 根目录 `仪表盘.md`；可选 GLM「今晚摘要」（注入 `profile.md` 画像，预算帽 $3/月，超帽自动降频为周日一次）
+- `report.py` — 晚间报告（`tomorrow.md`）六大板块；可选 GLM「今晚摘要」（注入 `profile.md` 画像，预算帽 $3/月，超帽自动降频为周日一次）
 - `triage.py` — 周日 20:00 inbox 分拣：私人内容（情绪/感情关键词）代码侧拦截、LLM 拿不准强制 HOLD、白名单校验三重防御；失败 = 全部 hold，数据永不丢失
-- `weekly_review.py` — 周复盘 `week-YYYY-Www.md` 七板块（只统计不评判）+ GLM 起草「下周三件事」+ 顺带维护画像
+- `weekly_review.py` — 周复盘 `week-YYYY-Www.md`（滑落/⭐/inbox/节律传感器/待定问题与到期卡/用量，只统计不评判）+ GLM 起草「下周三件事」（主线锚定）+ 顺带维护画像
 - `profile.py` — 用户画像 `profile.md`（每周日随复盘更新）：手写区代码级回填、红线关键词、结构白名单、行数上限四重守卫，任何失败保持上周版
-- `ics.py` — 每晚生成 `reports/deadlines.ics`（⭐ 硬节点与未来日期 → 全天事件 + 前一天提醒），导入手机日历即得系统级通知
-- `.github/workflows/evening.yml` — reusable：每晚 21:00（PT）报告 + 仪表盘（data 检出须 `fetch-depth: 0`，quiet 门/滑落/完成数/stats 都依赖 git 历史）
+- `ics.py` — 每晚生成 `reports/deadlines.ics`（⭐ 硬节点、未来日期与决策卡复盘日 → 全天事件 + 前一天提醒），导入手机日历即得系统级通知
+- `.github/workflows/evening.yml` — reusable：每晚 21:00（PT）报告（data 检出须 `fetch-depth: 0`，quiet 门/滑落/完成数/stats 都依赖 git 历史）
 - `.github/workflows/weekly.yml` — reusable：周日 20:00（PT）分拣 + 周复盘 + 画像维护
 - 两个 workflow 都由数据仓调用，用调用方自带 `GITHUB_TOKEN` 提交，无需任何 PAT
 

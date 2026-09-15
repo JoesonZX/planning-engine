@@ -51,7 +51,7 @@ jobs:
 
       - name: Commit report
         run: |
-          git add reports/ 仪表盘.md
+          git add reports/
           if ! git diff --cached --quiet; then
             git commit -m "evening report $(TZ=America/Los_Angeles date +%F)"
             git pull --rebase --quiet || true
@@ -59,19 +59,4 @@ jobs:
           else
             echo "report unchanged, nothing to commit"
           fi
-
-      - name: Push notification (success)
-        if: success()
-        env:
-          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
-        run: |
-          pip install -q pywebpush 2>/dev/null || true
-          python engine/notify.py --vault . --kind evening || true
-
-      - name: Push notification (failure)
-        if: failure()
-        env:
-          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
-        run: |
-          pip install -q pywebpush 2>/dev/null || true
-          python engine/notify.py --vault . --kind failure --msg "晚间报告任务失败，打开 GitHub Actions 查看日志（或让 ZCode 修）" || true
+        # v13：推送通知退役（push-sub.json 从未存在=零使用）——失败告警依赖 GitHub Actions 默认邮件

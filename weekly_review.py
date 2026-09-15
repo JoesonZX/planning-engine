@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""周复盘：周日 20:00 生成 reports/week-YYYY-Www.md（七板块，只统计不评判）。
+"""周复盘：周日 20:00 生成 reports/week-YYYY-Www.md（只统计不评判）。
 
-数据源：Snapshot（滑落/硬节点/inbox）+ git diff（完成/新增计数）
-+ GLM（下周三件事草稿）+ 顺带维护画像（profile.update_profile）。
+v13 结构：滑落/硬节点/inbox/节律传感器/待定问题与到期卡/用量。
+任务计数两节退役（执行层已外包给 todo 应用，勾选统计只见于晚报「今日完成」）。
+数据源：Snapshot（滑落/硬节点/inbox/文件年龄）+ 决策卡复盘日期 + GLM（反思与三件事，
+注入主线锚定防自噬）+ 顺带维护画像（profile.update_profile）。
 """
 
 from __future__ import annotations
@@ -12,7 +14,6 @@ import datetime as dt
 import json
 import os
 import re
-import subprocess
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -20,35 +21,6 @@ from parser import load_config
 from vault import Snapshot
 from llm import call_glm, month_spend
 from report import SYSTEM_PROMPT, collect_stale
-
-
-# ---------------------------------------------------------------- git 统计
-
-def added_checkboxes_by_file(root: Path, since: str, until: str | None = None,
-                             done: bool = True) -> dict[str, int]:
-    """时间窗内 diff 新增的 checkbox 行数，按文件分组。"""
-    args = ["git", "-C", str(root), "-c", "core.quotepath=false",
-            "log", "-p", "--unified=0", f"--since={since}"]
-    if until:
-        args.append(f"--until={until}")
-    args += ["--", "*.md"]
-    try:
-        log = subprocess.run(args, capture_output=True, text=True,
-                             encoding="utf-8", errors="replace",
-                             timeout=60, check=True).stdout
-    except (subprocess.SubprocessError, OSError):
-        return {}
-    counts: dict[str, int] = {}
-    current = "?"
-    for line in log.splitlines():
-        if line.startswith("diff --git"):
-            m = re.match(r"diff --git a/(.*?) b/", line)
-            current = m.group(1) if m else "?"
-        elif line.startswith("+") and not line.startswith("+++"):
-            hit = ("- [x]" in line or "- [X]" in line) if done else ("- [ ]" in line)
-            if hit:
-                counts[current] = counts.get(current, 0) + 1
-    return counts
 
 
 # ---------------------------------------------------------------- 报告主体
@@ -63,12 +35,6 @@ def render_weekly(snap: Snapshot) -> tuple[str, str]:
 
     entries = snap.entries
 
-    next_day = (week_end + dt.timedelta(days=1)).isoformat()
-    prev_end = (week_start - dt.timedelta(days=1)).isoformat()
-    done_now = added_checkboxes_by_file(snap.root, week_start.isoformat(), next_day, done=True)
-    done_prev = added_checkboxes_by_file(snap.root, prev_end, week_start.isoformat(), done=True)
-    new_now = added_checkboxes_by_file(snap.root, week_start.isoformat(), done=False)
-
     lines: list[str] = []
     title = f"周复盘 · {iso[0]}-W{iso[1]:02d}（{week_start:%m/%d}–{week_end:%m/%d}）"
     lines.append(f"# 📊 {title}")
@@ -76,32 +42,9 @@ def render_weekly(snap: Snapshot) -> tuple[str, str]:
     lines.append(f"> 生成于 {now:%Y-%m-%d %H:%M} ｜ 只统计不评判（物流模式）")
     lines.append("")
 
-    # 一、本周完成
-    total_now = sum(done_now.values())
-    total_prev = sum(done_prev.values())
-    lines.append("## 一、本周完成")
-    lines.append("")
-    if done_now:
-        for f in sorted(done_now, key=done_now.get, reverse=True):
-            lines.append(f"- {done_now[f]} ｜ {f}")
-    else:
-        lines.append("最近 7 天没有新勾选")
-    lines.append("")
-    lines.append(f"**{total_now}** 件（上周 {total_prev}，"
-                 f"{'↑' if total_now > total_prev else '↓' if total_now < total_prev else '持平'}）")
-    lines.append("")
-
-    # 二、环比（并入一区顶部，这里给新增）
-    lines.append("## 二、本周新增任务")
-    lines.append("")
-    new_total = sum(new_now.values())
-    lines.append(f"新写了 **{new_total}** 条开放任务" +
-                 (f"（其中 {new_now.get('?', 0)} 条来源未识别）" if new_now.get("?") else ""))
-    lines.append("")
-
-    # 三、滑落升级（全量，不截断）
+    # 一、滑落升级（全量，不截断）
     stale = collect_stale(snap)
-    lines.append(f"## 三、滑落升级（≥{snap.stale_days} 天未动，全量）")
+    lines.append(f"## 一、滑落升级（≥{snap.stale_days} 天未动，全量）")
     lines.append("")
     if stale:
         lines.extend(stale)
@@ -109,11 +52,11 @@ def render_weekly(snap: Snapshot) -> tuple[str, str]:
         lines.append("（没有滑落项）")
     lines.append("")
 
-    # 四、本周硬节点（报告周范围内的 ⭐）
+    # 二、本周硬节点（报告周范围内的 ⭐）
     nodes = [e for e in entries if e.star
              and any(week_start <= d <= week_end for d in e.dates)]
     nodes.sort(key=lambda e: (e.file, e.line))
-    lines.append("## 四、本周硬节点（⭐）")
+    lines.append("## 二、本周硬节点（⭐）")
     lines.append("")
     if nodes:
         for e in nodes:
@@ -125,7 +68,7 @@ def render_weekly(snap: Snapshot) -> tuple[str, str]:
         lines.append("（本周没有 ⭐ 硬节点）")
     lines.append("")
 
-    # 五、inbox 与分拣残留
+    # 三、inbox 与分拣残留
     held_n = sum(1 for s in snap.inbox_lines if s.startswith("⏳"))
     triage_info = ""
     triage_path = snap.root / "reports" / "triage-latest.json"
@@ -135,12 +78,12 @@ def render_weekly(snap: Snapshot) -> tuple[str, str]:
             triage_info = f"上次分拣（{t.get('ts', '?')[:10]}）：归档 {t.get('classified', 0)} 条、待人工 {t.get('held', 0)} 条"
         except json.JSONDecodeError:
             pass
-    lines.append("## 五、inbox 残留")
+    lines.append("## 三、inbox 残留")
     lines.append("")
     lines.append(f"⏳ 待人工 **{held_n}** 条" + (f" ｜ {triage_info}" if triage_info else ""))
     lines.append("")
 
-    # 五点五、本周节律（状态传感器，v13）——日记天数/睡眠只从「做了什么」节统计，
+    # 四、本周节律（状态传感器，v13）——日记天数/睡眠只从「做了什么」节统计，
     # 感受区代码级排除（写了感受-only 的日记也算写了，不施压产出行为内容）。
     # 日记 ≥3 天未写=⚠️ 断线警报；无日记不再静默缺席（W37 盲区教训）。
     # 社交机器不可观测，只列自查行。
@@ -172,7 +115,7 @@ def render_weekly(snap: Snapshot) -> tuple[str, str]:
                 sleep_vals.append(float(sm.group(1)))
         if items:
             diary_lines.append(f"**{d.month}/{d.day}** " + "；".join(items))
-    lines.append("## 五点五、本周节律（状态传感器）")
+    lines.append("## 四、本周节律（状态传感器）")
     lines.append("")
     miss_txt = f"（缺 {'、'.join(f'{d:%m/%d}' for d in missing)}）" if missing else ""
     alarm = " ｜ ⚠️ 断线警报：≥3 天未写——传感器盲区" if len(missing) >= 3 else ""
@@ -185,6 +128,16 @@ def render_weekly(snap: Snapshot) -> tuple[str, str]:
     if diary_lines:
         lines.append("")
         lines.extend(f"- {x}" for x in diary_lines)
+    lines.append("")
+
+    # 五、待定问题与到期卡（v13：「时刻更新」的最小机制——悬空问题与到期复盘不再靠人脑记）
+    lines.append("## 五、待定问题与到期卡")
+    lines.append("")
+    due_lines = render_due_and_pending(snap, week_end)
+    if due_lines:
+        lines.extend(due_lines)
+    else:
+        lines.append("（没有悬空的待定问题，也没有未来 7 天内到期/逾期的决策卡）")
     lines.append("")
 
     # 六、用量
@@ -201,6 +154,80 @@ def render_weekly(snap: Snapshot) -> tuple[str, str]:
 def build_weekly(root: Path, cfg: dict, now: dt.datetime) -> tuple[str, str]:
     """兼容入口（golden/外部调用）。"""
     return render_weekly(Snapshot.load(root, cfg, now))
+
+
+# ---------------------------------------------------------------- 待定与到期（v13）
+
+DATE_RE = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
+
+
+def load_card_reviews(root: Path) -> list[tuple[dt.date, str, str]]:
+    """决策卡的复盘日期 → [(日期, 卡名, 相对路径)]。只认完整 YYYY-MM-DD；
+    「2026-12 中」这类月级模糊日期不进日历（避免捏造具体日）。"""
+    d = root / "决策"
+    out: list[tuple[dt.date, str, str]] = []
+    if not d.is_dir():
+        return out
+    for f in sorted(d.glob("*.md")):
+        if f.name.startswith("_"):
+            continue
+        try:
+            txt = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        m = re.search(r"\*\*复盘日期\*\*[：:](.+)", txt)
+        if not m:
+            continue
+        title = re.sub(r"^\d{4}-\d{2}-\d{2}\s*", "", f.stem)
+        for y, mo, dy in DATE_RE.findall(m.group(1)):
+            try:
+                out.append((dt.date(int(y), int(mo), int(dy)), title, f"决策/{f.name}"))
+            except ValueError:
+                continue
+    return out
+
+
+def _pending_questions(root: Path, file_ages: dict[str, float]) -> list[str]:
+    """中期文件的「## 待定问题」节：逐条列出 + 文件已挂天数（M3：悬空可见）。"""
+    out: list[str] = []
+    plan_dir = root / "规划"
+    if not plan_dir.is_dir():
+        return out
+    for f in sorted(plan_dir.glob("*.md")):
+        try:
+            txt = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        m = re.search(r"^## 待定问题\s*\n([\s\S]*?)(?=\n## |\Z)", txt, re.M)
+        if not m:
+            continue
+        items = [ln.strip() for ln in m.group(1).splitlines()
+                 if re.match(r"^\d+\.\s", ln.strip())]
+        if not items:
+            continue
+        age = file_ages.get(f"规划/{f.name}")
+        age_txt = f"，文件已挂 {age:.0f} 天" if isinstance(age, (int, float)) else ""
+        out.append(f"- 《{f.name}》待定问题（{len(items)} 条{age_txt}）：")
+        out.extend(f"  - {it}" for it in items)
+    return out
+
+
+def render_due_and_pending(snap: Snapshot, week_end: dt.date) -> list[str]:
+    """到期决策卡（未来 7 天内或已逾期）+ 中期文件待定问题。"""
+    today = snap.today
+    lines: list[str] = []
+    cards = load_card_reviews(snap.root)
+    due = [(d, t, p) for d, t, p in cards if d <= today + dt.timedelta(days=7)]
+    if due:
+        lines.append("**决策卡复盘到期**：")
+        for d, title, path in sorted(due):
+            when = "今天" if d == today else (
+                f"⚠️ 逾期 {(today - d).days} 天" if d < today else f"{(d - today).days} 天后")
+            lines.append(f"- {d.isoformat()} 《{title}》——{when}（{path}）")
+        lines.append("")
+    pending = _pending_questions(snap.root, snap.file_ages)
+    lines.extend(pending)
+    return lines
 
 
 def load_decision_cards(root: Path) -> str:
@@ -232,9 +259,13 @@ def glm_three_things(weekly_body: str, cfg: dict, api_key: str | None,
         + (f"=== 决策卡 ===\n{decisions}\n\n" if decisions else "")
         + "先做本周反思（三问，各一两句，指向具体事实）："
         "①现在最重要的事是什么；②哪些日常系统在支撑它；③什么在拖累。\n"
+        "锚定规则：①②的回答必须落在人生规划主线（目标教授/科研/课业/健康/英语），"
+        "系统自身（规划文档、报告、工具链）至多允许作为③出现一次——"
+        "除非报告显示系统故障；把系统维护当反思主体是本问退化的信号。\n"
         "然后基于反思起草「下周三件事」：三条具体的、可直接执行的建议"
         "（每条一句话，物流语气，不评判、不谈状态），"
-        "只从报告已有的事项中挑优先级最高的，且与决策卡方向一致。格式：\n"
+        "只从报告已有的事项中挑优先级最高的，且与决策卡方向一致；"
+        "「五、待定问题与到期卡」里有到期复盘或久悬待定问题时优先纳入。格式：\n"
         "## 本周反思\n①…\n②…\n③…\n\n## 下周三件事\n1. …\n2. …\n3. …\n\n"
         + weekly_body
     )
@@ -269,7 +300,7 @@ def main() -> int:
                              root / "reports" / "usage.json", now,
                              decisions=load_decision_cards(root))
     lines = body.splitlines()
-    insert = next((i for i, l in enumerate(lines) if l.startswith("## 五、")), len(lines))
+    insert = next((i for i, l in enumerate(lines) if l.startswith("## 三、")), len(lines))
     block = ["## ⏭️ 下周三件事（草稿，认可后自己抄进清单）", ""]
     block += (draft or "（本次 GLM 未生成——自己想三件事）").splitlines()
     block += [""]

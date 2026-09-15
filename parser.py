@@ -204,7 +204,6 @@ def load_config(root: Path) -> dict:
         "skip_files": [],
         "skip_dirs": [".git", "reports", ".github", "engine", "日记"],
         "inbox_file": "inbox.md",
-        "dashboard_file": "仪表盘.md",
         "profile_file": "profile.md",
         "weekly_hour": 20,
         "triage_targets": [],
@@ -313,9 +312,9 @@ def generated_files(cfg: dict) -> set[str]:
     """引擎生成物集合：不参与解析，防止自我引用（画像修订记录的日期行会被当成任务）。
 
     新增生成物时只改这里——report/state/weekly/ics 全部从本函数取排除集。
+    v13：仪表盘退役，不再是生成物。
     """
     return {cfg.get("inbox_file", "inbox.md"),
-            cfg.get("dashboard_file", "仪表盘.md"),
             cfg.get("profile_file", "profile.md")}
 
 

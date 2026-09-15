@@ -124,7 +124,13 @@ def slugify(text: str, taken: set[str]) -> str:
     from distill import rule_na
     base_src = rule_na(clean_task_text(text))          # 蒸馏出动作段再做文件名
     base_src = re.sub(r"^[\d.／/\-–—]+\s*", "", base_src)  # 剥行首日期
+    base_src = re.sub(r"（[日一二三四五六]）", "", base_src)  # 剥旧清单的星期标记（"926六" 的来源）
     base = re.sub(r"[^\w\u4e00-\u9fff]+", "", base_src)[:20] or "brief"
+    # 截断不切在英文/数字 token 中间（"问题X"←Xiaolong 这类断尾回退到词边界；
+    # 用 ASCII 类而不用 \w——\w 在 Python3 匹配 CJK，整串都是词字符会失效）
+    m = re.search(r"[A-Za-z0-9]+$", base)
+    if m and m.start() > 4:
+        base = base[:m.start()]
     slug, n = base, 2
     while slug in taken:
         slug = f"{base}-{n}"
