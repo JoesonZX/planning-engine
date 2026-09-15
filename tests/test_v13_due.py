@@ -43,7 +43,7 @@ class TestCardReviews(unittest.TestCase):
             self.assertEqual([(d, t) for d, t in cards],
                              [(dt.date(2026, 9, 16), "决策复盘 · 学习卡")])
             snap = Snapshot.load(root, CFG, NOW)
-            lines = render_due_and_pending(snap, snap.today)
+            lines = render_due_and_pending(snap)
             body = "\n".join(lines)
             self.assertIn("决策卡复盘到期", body)
             self.assertIn("《学习卡》——3 天后", body)
@@ -57,7 +57,7 @@ class TestCardReviews(unittest.TestCase):
             # 月级模糊日期（2026-12）不进日历；完整日期保留
             self.assertEqual([d for d, _ in cards], [dt.date(2026, 9, 10)])
             snap = Snapshot.load(root, CFG, NOW)
-            body = "\n".join(render_due_and_pending(snap, snap.today))
+            body = "\n".join(render_due_and_pending(snap))
             self.assertIn("⚠️ 逾期 3 天", body)
 
     def test_pending_questions_with_age(self):
@@ -65,7 +65,7 @@ class TestCardReviews(unittest.TestCase):
             root = Path(tmp)
             make_vault(root)
             snap = Snapshot.load(root, CFG, NOW)
-            body = "\n".join(render_due_and_pending(snap, snap.today))
+            body = "\n".join(render_due_and_pending(snap))
             # 非 git 目录 → 无年龄标注（年龄路径由带 git 历史的 golden 覆盖）
             self.assertIn("《term.md》待定问题（2 条）：", body)
             self.assertIn("主目标教授人选", body)

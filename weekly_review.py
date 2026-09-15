@@ -133,7 +133,7 @@ def render_weekly(snap: Snapshot) -> tuple[str, str]:
     # 五、待定问题与到期卡（v13：「时刻更新」的最小机制——悬空问题与到期复盘不再靠人脑记）
     lines.append("## 五、待定问题与到期卡")
     lines.append("")
-    due_lines = render_due_and_pending(snap, week_end)
+    due_lines = render_due_and_pending(snap)
     if due_lines:
         lines.extend(due_lines)
     else:
@@ -212,7 +212,7 @@ def _pending_questions(root: Path, file_ages: dict[str, float]) -> list[str]:
     return out
 
 
-def render_due_and_pending(snap: Snapshot, week_end: dt.date) -> list[str]:
+def render_due_and_pending(snap: Snapshot) -> list[str]:
     """到期决策卡（未来 7 天内或已逾期）+ 中期文件待定问题。"""
     today = snap.today
     lines: list[str] = []
